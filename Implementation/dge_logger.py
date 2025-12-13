@@ -30,15 +30,19 @@ class DGELogger:
                     'Task',
                     'Loss', 
                     'Perplexity', 
-                    'Memory_MB', 
-                    'Memory_MB', 
-                    'Frozen_Grad_Norm', # Aggregate logic (Still present for backward compat/quick scan)
-                    'Frozen_Weight_Grad',
-                    'Frozen_Bias_Grad',
-                    'Frozen_Head_Grad',
+                    'Memory_MB',
+                    'Fried_Grad_Norm', # Renamed from Frozen
                     'Gate_Grad_Norm',
                     'Max_Gate_Mag',
-                    'Active_Grad_Norm'
+                    'Active_Grad_Norm',
+                    # Forensic Metrics
+                    'Gate_Bias_Max',
+                    'Gate_Bias_Min',
+                    'Gate_Bias_Mean',
+                    'Router_Weight_Norm',
+                    'Probe_Loss',
+                    'Probe_PPL',
+                    'Probe_Gate_Bias_Max'
                 ])
         
         # Log CREATED event
@@ -70,8 +74,8 @@ class DGELogger:
         """
         Appends a row to the unified training log.
         """
-        frozen_norm = metrics.get('frozen_grad_norm', 0.0)
-        active_norm = metrics.get('active_grad_norm', 0.0)
+        frozen_norm = metrics.get('Frozen_Grad_Norm', 0.0) # Title Case
+        active_norm = metrics.get('active_grad_norm', metrics.get('Active_Grad_Norm', 0.0))
         
         os.makedirs(self.logs_dir, exist_ok=True)
         
@@ -83,12 +87,16 @@ class DGELogger:
                 f"{loss:.6f}", 
                 f"{perplexity:.6f}", 
                 f"{memory_mb:.2f}",
-                f"{memory_mb:.2f}",
                 f"{frozen_norm:.9f}",
-                f"{metrics.get('frozen_weight_grad', 0.0):.9f}",
-                f"{metrics.get('frozen_bias_grad', 0.0):.9f}",
-                f"{metrics.get('frozen_head_grad', 0.0):.9f}",
-                f"{metrics.get('gate_grad_norm', 0.0):.9f}",
-                f"{metrics.get('max_gate_mag', 0.0):.4f}",
-                f"{active_norm:.6f}"
+                f"{metrics.get('Gate_Grad_Norm', 0.0):.9f}",
+                f"{metrics.get('Max_Gate_Mag', 0.0):.4f}",
+                f"{active_norm:.6f}",
+                # Forensic
+                f"{metrics.get('Gate_Bias_Max', 0.0):.4f}",
+                f"{metrics.get('Gate_Bias_Min', 0.0):.4f}",
+                f"{metrics.get('Gate_Bias_Mean', 0.0):.4f}",
+                f"{metrics.get('Router_Weight_Norm', 0.0):.4f}",
+                f"{metrics.get('Probe_Loss', 0.0):.6f}",
+                f"{metrics.get('Probe_PPL', 0.0):.6f}",
+                f"{metrics.get('Probe_Gate_Bias_Max', 0.0):.4f}"
             ])
