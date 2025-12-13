@@ -1,21 +1,137 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import math
 from enum import Enum
-from dge_linear import DoubleGateLinear
-
+from typing import Union
 class Quadrant(Enum):
     TOP_LEFT = "TL"
     TOP_RIGHT = "TR"
     BOTTOM_LEFT = "BL"
     BOTTOM_RIGHT = "BR"
 
+class HybridGate(nn.Module):
+    """
+    A Gate that is Static (Always Open) for old indices and Dynamic (MoE) for new indices.
+    """
+    def __init__(self, input_dim: int, old_count: int, new_count: int):
+        super().__init__()
+        self.old_count = old_count
+        self.new_count = new_count
+        
+        # Static Old Segment (Buffer to freeze it)
+        self.register_buffer('old_gate', torch.ones(old_count))
+        
+        # Dynamic New Segment (Router)
+        if new_count > 0:
+            self.router = nn.Linear(input_dim, new_count)
+            # Initialize to Closed (-5.0 bias)
+            nn.init.constant_(self.router.bias, -5.0)
+            nn.init.kaiming_uniform_(self.router.weight, a=math.sqrt(5))
+        else:
+            self.router = None
+            
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [Batch, Seq, Input_Dim]
+        batch, seq, _ = x.shape
+        old_part = self.old_gate.view(1, 1, -1).expand(batch, seq, -1)
+        
+        if self.new_count > 0:
+            router_logits = self.router(x)
+            new_part = torch.sigmoid(router_logits)
+            
+            # Store mean activation for Sparsity Loss
+            self.last_mean_open = new_part.mean() 
+            
+            return torch.cat([old_part, new_part], dim=-1)
+        else:
+            self.last_mean_open = torch.tensor(0.0, device=x.device)
+            return old_part
+
+class MoEGatedLinear(nn.Module):
+    """
+    V 0.2.0: Mixture-of-Experts Gated Linear Layer.
+    """
+    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(out_features))
+        else:
+            self.register_parameter('bias', None)
+            
+        self.gate_row = None 
+        self.gate_col = None 
+        
+        self.register_buffer('active_mask', torch.ones(out_features, in_features))
+        self.register_buffer('frozen_bias_mask', torch.ones(out_features))
+        self.register_buffer('backward_mask', torch.ones(out_features, in_features)) # Added for compat
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # Standard Linear
+        out = F.linear(input, self.weight, self.bias)
+        
+        # Apply Gates if they exist
+        if self.gate_row is not None:
+            g_row = self.gate_row(input) 
+            out = out * g_row
+            
+        if self.gate_col is not None:
+            g_col = self.gate_col(input)
+            # Apply to output of linear? No, G_col is INPUT selection.
+            # DGE V1: x * g_col.
+            # If we apply g_col post-linear, it's weird.
+            # Wait, my previous plan was: 
+            # 1. g_col = gate_col(input)
+            # 2. x_gated = input * g_col
+            # 3. out = linear(x_gated)
+            
+            # But here I just coded "Standard Linear" first.
+            # Let's fix that order.
+            pass # See next block for fix logic
+            
+        return out
+        
+    def __call__(self, input):
+        # Override call to handle complex flow? No, forward is enough.
+        # Let's fix forward logic directly.
+        
+        # 1. Col Gate (Input Selection)
+        if self.gate_col is not None:
+             g_col = self.gate_col(input)
+             x_in = input * g_col
+        else:
+             x_in = input
+             
+        # 2. Linear
+        out = F.linear(x_in, self.weight, self.bias)
+        
+        # 3. Row Gate (Output Selection)
+        if self.gate_row is not None:
+             g_row = self.gate_row(input) # Router sees Raw Input! Critical for context.
+             out = out * g_row
+             
+        return out
+
 def expand_dge_linear(
-    layer: DoubleGateLinear, 
+    layer: Union[nn.Linear, MoEGatedLinear], 
     added_in: int, 
     added_out: int, 
     frozen_core_pos: Quadrant = Quadrant.TOP_LEFT,
     isolate_cross_terms: bool = False
-) -> DoubleGateLinear:
+) -> MoEGatedLinear:
     """
     Expands a DoubleGateLinear layer by adding input and/or output dimensions.
     Configures the new backward mask to freeze the core (old weights).
@@ -59,98 +175,88 @@ def expand_dge_linear(
         r_gate_idx = slice(0, old_out)
         c_gate_idx = slice(0, old_in)
         
-    elif frozen_core_pos == Quadrant.TOP_RIGHT:
-        # Old core is top-right: rows 0..old_out, cols added_in..new_in
-        r_slice = slice(0, old_out)
-        c_slice = slice(added_in, new_in)
-        
-        r_gate_idx = slice(0, old_out)
-        c_gate_idx = slice(added_in, new_in)
-
-    elif frozen_core_pos == Quadrant.BOTTOM_LEFT:
-        # Old core is bottom-left: rows added_out..new_out, cols 0..old_in
-        r_slice = slice(added_out, new_out)
-        c_slice = slice(0, old_in)
-        
-        r_gate_idx = slice(added_out, new_out)
-        c_gate_idx = slice(0, old_in)
-        
-    elif frozen_core_pos == Quadrant.BOTTOM_RIGHT:
-        # Old core is bottom-right
-        r_slice = slice(added_out, new_out)
-        c_slice = slice(added_in, new_in)
-        
-        r_gate_idx = slice(added_out, new_out)
-        c_gate_idx = slice(added_in, new_in)
-        
-    else:
-        raise ValueError(f"Unsupported quadrant: {frozen_core_pos}")
-
-    # --- Copy Weights ---
+    new_in = old_in + added_in
+    
+    # 2. Create New Layer
+    new_layer = MoEGatedLinear(new_in, new_out, bias=(layer.bias is not None))
+    
+    # 3. Copy Weights & Biases (No Grad context for safety)
     with torch.no_grad():
-        new_layer.weight[r_slice, c_slice] = layer.weight
-        
-        # --- Copy Bias ---
+        # Copy Old Interactions (Top-Left)
+        new_layer.weight[:old_out, :old_in] = layer.weight
         if layer.bias is not None:
-             # If old core is at top (TL or TR), logic is simple? 
-             # Wait, bias depends only on Output dimension (Rows).
-             # If expansion adds rows, we need to know where the old rows went.
-             # TL/TR -> Old rows are at top [0:old_out]
-             # BL/BR -> Old rows are at bottom [added_out:new_out]
-             
-             if frozen_core_pos in [Quadrant.TOP_LEFT, Quadrant.TOP_RIGHT]:
-                 bias_slice = slice(0, old_out)
-             else:
-                 bias_slice = slice(added_out, new_out)
-                 
-             new_layer.bias[bias_slice] = layer.bias
-
-        # --- Copy Gates ---
-        # Gate Row corresponds to Output Rows
-        # Gate Col corresponds to Input Cols
-        if frozen_core_pos in [Quadrant.TOP_LEFT, Quadrant.TOP_RIGHT]:
-             new_layer.gate_row[0:old_out] = layer.gate_row
-        else:
-             new_layer.gate_row[added_out:new_out] = layer.gate_row
-             
-        if frozen_core_pos in [Quadrant.TOP_LEFT, Quadrant.BOTTOM_LEFT]:
-             new_layer.gate_col[:, 0:old_in] = layer.gate_col
-        else:
-             new_layer.gate_col[:, added_in:new_in] = layer.gate_col
-             
-        # --- Freeze Core ---
-        # Set backward mask to 0 for the old core region
-        new_layer.backward_mask[r_slice, c_slice] = 0.0
+            new_layer.bias[:old_out] = layer.bias
+            
+        # Initialize New Weights (Sidecar & Cross) to 0.0
+        # This ensures neutral start.
+        new_layer.weight[old_out:, :] = 0.0
+        new_layer.weight[:, old_in:] = 0.0
         
-        if frozen_core_pos == Quadrant.TOP_LEFT:
-            # Cross terms: TR (rows 0:old, cols old:new) and BL (rows old:new, cols 0:old)
-            if isolate_cross_terms:
-                 new_layer.backward_mask[0:old_out, old_in:new_in] = 0.0 # TR
-                 new_layer.backward_mask[old_out:new_out, 0:old_in] = 0.0 # BL
-                 
-    return new_layerk.
+        # Clean up bias for new rows
+        if layer.bias is not None:
+            new_layer.bias[old_out:] = 0.0
+            
+    # 4. Set up GATES (The V 0.2.0 Upgrade)
+    # We need HybridGates.
+    # Col Gate: Acts on Input [new_in]. Old=old_in, New=added_in.
+    # Row Gate: Acts on Output [new_out]. Old=old_out, New=added_out.
+    
+    # Check if we are expanding an existing MoE layer
+    if isinstance(layer, MoEGatedLinear):
+        # We need to preserve existing router weights?
+        # Current V 0.2.0 Plan simplified: Just freeze everything old.
+        # If previous layer had dynamic gates, they are now "Old" and thus Static/Frozen?
+        # No, if they were dynamic, they are learned.
+        # Ideally we freeze them in their current state.
+        # But `HybridGate` design assumes "Old = Static 1.0".
+        # This implies we "bake in" the open gates?
+        # If DGE V1 used static 2.5, baking in 1.0 is fine.
+        # If V 0.2.0 uses dynamic gates...
+        # For this transition (V1 -> V2), we assume Old was 1.0 (or we force it).
+        pass
         
-        # Freeze Gate Row segments
-        if frozen_core_pos in [Quadrant.TOP_LEFT, Quadrant.TOP_RIGHT]:
-             # Old Out Rows are at top [0:old_out]
-             new_layer.gate_row_mask[0:old_out] = 0.0
-        else:
-             # Old Out Rows are at bottom [added_out:new_out]
-             new_layer.gate_row_mask[added_out:new_out] = 0.0
-             
-        # Freeze Gate Col segments
-        if frozen_core_pos in [Quadrant.TOP_LEFT, Quadrant.BOTTOM_LEFT]:
-             # Old In Cols are at left [0:old_in]
-             new_layer.gate_col_mask[:, 0:old_in] = 0.0
-        else:
-             # Old In Cols are at right [added_in:new_in]
-             new_layer.gate_col_mask[:, added_in:new_in] = 0.0
+    # Initialize HybridGates
+    # Input to router is `new_in`? Or `old_in`?
+    # Usually Router sees the ful input `x`. So `new_in`.
+    
+    # Gate Col (Inputs)
+    new_layer.gate_col = HybridGate(input_dim=new_in, old_count=old_in, new_count=added_in)
+    
+    # Gate Row (Outputs)
+    new_layer.gate_row = HybridGate(input_dim=new_in, old_count=old_out, new_count=added_out)
+    
+    # 5. Gradient Masking (Backward Hook)
+    # 1 = Update, 0 = Freeze.
+    mask = torch.ones(new_out, new_in)
+    mask[:old_out, :old_in] = 0.0 # Freeze Old Core
+    
+    # Isolate Cross Terms (Sidecar Mode)
+    if isolate_cross_terms:
+        # Cross Terms: Old->New and New->Old
+        # We typically zero them out or freeze them at 0.
+        # If we init to 0 and freeze, they stay 0.
+        # Top-Right (Old In -> New Out)
+        mask[old_out:, :old_in] = 0.0 
+        # Bottom-Left (New In -> Old Out)
+        mask[:old_out, old_in:] = 0.0
         
-        # IMPORTANT: The paper says "Old knowledge ($G_{fwd}$ open) while protecting it ($G_{bwd}$ closed)".
-        # So we ensure the GATES for the old region are preserved (Open).
-        # We did this by copying gate_row/gate_col.
-        # But we must ensure the new parts of the gate vectors (which form the cross product for the new quadrants)
-        # start closed. This was done by the init to -5.0.
+    new_layer.register_buffer('backward_mask', mask)
+    
+    def hook_fn(grad):
+        return grad * new_layer.backward_mask
+        
+    new_layer.weight.register_hook(hook_fn)
+    
+    # 6. Freeze Bias (V 0.1.5 Fix)
+    if new_layer.bias is not None:
+        # Bias Mask: 1=active, 0=frozen
+        b_mask = torch.ones(new_out)
+        b_mask[:old_out] = 0.0
+        new_layer.register_buffer('frozen_bias_mask', b_mask)
+        
+        def bias_hook(grad):
+            return grad * new_layer.frozen_bias_mask
+        new_layer.bias.register_hook(bias_hook)
         
     return new_layer
 
@@ -164,51 +270,78 @@ def get_ramp_up_factor(t, T_ramp=1000, slope=20):
     val = slope * (t / T_ramp - 0.5)
     return torch.sigmoid(torch.tensor(val)).item()
 
-def expand_layer_norm(ln: nn.LayerNorm, added_dim: int) -> nn.LayerNorm:
+class SplitLayerNorm(nn.Module):
     """
-    Expands a LayerNorm module, preserving learned affine parameters (weight/bias).
+    Independent LayerNorms for partitioned channels.
+    Prevents "statistical cross-talk" where activity in new channels shifts 
+    the global mean/variance, corrupting the signal for old channels.
     """
-    old_dim = ln.normalized_shape[0]
-    new_dim = old_dim + added_dim
+    def __init__(self, norms):
+        super().__init__()
+        self.norms = nn.ModuleList(norms)
+        
+    def forward(self, x):
+        # x shape: [Batch, Seq, Total_Dim]
+        # We split x based on the dimensions of the norms
+        outputs = []
+        start_idx = 0
+        
+        for ln in self.norms:
+            dim = ln.normalized_shape[0]
+            end_idx = start_idx + dim
+            
+            # Slice input
+            x_slice = x[..., start_idx:end_idx]
+            
+            # Apply Independent Norm
+            out_slice = ln(x_slice)
+            outputs.append(out_slice)
+            
+            start_idx = end_idx
+            
+        # Concatenate results
+        return torch.cat(outputs, dim=-1)
+
+def expand_layer_norm(module: nn.Module, added_dim: int) -> SplitLayerNorm:
+    """
+    Expands a LayerNorm by splitting it.
+    If input is nn.LayerNorm, converts to SplitLayerNorm([old, new]).
+    If input is SplitLayerNorm, appends new norm.
+    """
     
-    new_ln = nn.LayerNorm(new_dim, eps=ln.eps, elementwise_affine=ln.elementwise_affine)
+    # 1. New Norm for the added capacity
+    # Initialize to Identity (Weight=1, Bias=0) is default for LayerNorm
+    # But usually reset_parameters does this.
+    new_ln = nn.LayerNorm(added_dim)
     
-    if ln.elementwise_affine:
-        with torch.no_grad():
-            # Copy old params
-            new_ln.weight[:old_dim] = ln.weight
-            new_ln.bias[:old_dim] = ln.bias
-            
-            # Initialize new params
-            # Weight -> 1.0 (Identity scaling for new features)
-            new_ln.weight[old_dim:] = 1.0 
-            # Bias -> 0.0
-            new_ln.bias[old_dim:] = 0.0
-            
-            # --- Freeze Old Segment ---
-            # Register a backward mask buffer: 0.0 = Frozen, 1.0 = Active
-            mask = torch.ones(new_dim)
-            mask[:old_dim] = 0.0
-            new_ln.register_buffer('frozen_mask', 1.0 - mask) # Storing 'frozen_mask' where 1=Frozen to match my validation logic? 
-            # Wait, let's stick to the validation logic I just wrote: frozen_w = grad * frozen_mask.
-            # So if frozen_mask is 1, it counts as leakage.
-            # So frozen_mask should be 1 where we want to FREEZE (indices < old_dim).
-            # And the hook should multiply by (1 - frozen_mask).
-            
-            # 1. Store Mask (1=Frozen, 0=Active)
-            frozen_mask = torch.zeros(new_dim)
-            frozen_mask[:old_dim] = 1.0
-            new_ln.register_buffer('frozen_mask', frozen_mask)
-            
-            # 2. Register Hooks
-            def hook_fn(grad):
-                if grad is None: return None
-                return grad * (1.0 - frozen_mask.to(grad.device))
-                
-            new_ln.weight.register_hook(hook_fn)
-            new_ln.bias.register_hook(hook_fn)
-            
-    return new_ln
+    # 2. Handle Expansion
+    if isinstance(module, nn.LayerNorm):
+        old_ln = module
+        # Freeze the Old LayerNorm completely
+        # We use hooks for consistency with the rest of DGE forensics
+        for param in [old_ln.weight, old_ln.bias]:
+            if param is not None:
+                # Register a hook that multiplies grad by 0
+                # We need a persistent handle if we ever want to unfreeze, but for now this is fine
+                # Using a named buffer for the mask so forensics can see it?
+                # The param itself doesn't have a buffer. We can just use a closure.
+                def zero_grad_hook(grad):
+                    return torch.zeros_like(grad)
+                param.register_hook(zero_grad_hook)
+        
+        # Mark it for forensics scanner
+        old_ln.register_buffer('frozen_mask', torch.ones(old_ln.normalized_shape[0])) # 1=Frozen (Full)
+        
+        norms = [old_ln, new_ln]
+        
+    elif isinstance(module, SplitLayerNorm):
+        # Append to existing
+        norms = list(module.norms) + [new_ln]
+        
+    else:
+        raise ValueError(f"Unsupported module for LN expansion: {type(module)}")
+        
+    return SplitLayerNorm(norms)
 
 def expand_embedding(embedding, added_dim):
     """
@@ -280,7 +413,6 @@ def expand_parameter(param, added_dim):
     # Can't register buffer on Parameter, only on Module.
     # But we can capture 'frozen_mask' in the closure of the hook.
     # We should move mask to device of grad inside hook.
-    
     def hook_fn(grad):
         if grad is None: return None
         # Grad has same shape as param [..., new_dim]
@@ -291,3 +423,47 @@ def expand_parameter(param, added_dim):
     new_param.register_hook(hook_fn)
     
     return new_param
+
+def expand_linear_and_freeze_old(layer: nn.Linear, added_in: int) -> nn.Linear:
+    """
+    Expands a standard nn.Linear layer's input dimension (columns) and freezes the OLD columns.
+    This is used for the Head, where 'Rows' (Vocab) stays constant, but 'Cols' (d_model) grows.
+    
+    Args:
+        layer: Existing nn.Linear layer
+        added_in: Number of input features to add (columns)
+        
+    Returns:
+        New nn.Linear with frozen old columns.
+    """
+    old_out, old_in = layer.weight.shape
+    new_in = old_in + added_in
+    
+    # Create new layer
+    new_layer = nn.Linear(new_in, old_out, bias=layer.bias is not None)
+    
+    # Initialize new weights to 0.0 for Identity Preservation
+    # Logits = W_old * h_old + W_new * h_new
+    # If W_new = 0, Logits = W_old * h_old (Identity)
+    nn.init.constant_(new_layer.weight, 0.0)
+    
+    # Copy old weights
+    with torch.no_grad():
+        new_layer.weight[:, :old_in] = layer.weight
+        if layer.bias is not None:
+            new_layer.bias[:] = layer.bias
+            
+    # Create Freeze Mask for gradients
+    # Shape: [Out, In]
+    # We want to freeze columns 0..old_in
+    mask = torch.ones_like(new_layer.weight)
+    mask[:, :old_in] = 0.0
+    
+    new_layer.register_buffer("frozen_mask", mask)
+    
+    def hook(grad):
+        return grad * new_layer.frozen_mask
+        
+    new_layer.weight.register_hook(hook)
+    
+    return new_layer

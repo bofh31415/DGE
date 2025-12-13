@@ -428,13 +428,17 @@ class DGELab:
             print("="*50)
             print("1. 🔗 Run DGE Validation Chain (Up -> Expand -> Down)")
             print("b. 🔙 Back")
+            print("q. 🚪 Exit")
             
             choice = input("\nSelect Option: ").strip().lower()
             
             if choice == '1':
                 self.run_dge_validation_chain()
             elif choice == 'b':
-                return
+                break
+            elif choice == 'q':
+                print("👋 Exiting... Goodbye!")
+                exit()
             else:
                 print("❌ Invalid option.")
 
@@ -560,7 +564,6 @@ class DGELab:
         
         self.save_model()
         print("Validation Chain Complete.")
-        input("\nPress Enter to return to menu...")
 
     def run(self):
         print(f"\nWelcome to DGE Lab {__version__} (Forensic & Checkpoint Edition)")

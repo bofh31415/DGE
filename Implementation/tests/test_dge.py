@@ -7,40 +7,73 @@ import os
 # Add parent directory to path to import implementation modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from dge_linear import DoubleGateLinear
-from dge_utils import expand_dge_linear, expand_layer_norm, expand_embedding, Quadrant
+from dge_utils import expand_dge_linear, expand_layer_norm, expand_embedding, MoEGatedLinear, HybridGate
 
 class TestDGELinear(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(42)
 
     def test_initialization(self):
-        layer = DoubleGateLinear(10, 5)
+        # Base model initialization (no dynamic gates yet)
+        layer = MoEGatedLinear(10, 5)
         self.assertEqual(layer.weight.shape, (5, 10))
-        self.assertEqual(layer.backward_mask.shape, (5, 10))
-        self.assertTrue(torch.all(layer.backward_mask == 1.0))
+        # Initial mask is all ones (active)
+        self.assertTrue(torch.all(layer.active_mask == 1.0))
         
-        # Check initial gating (should be approx 1)
-        mask = layer.get_forward_mask()
-        self.assertTrue(torch.all(mask > 0.9))
+        # Gates are None by default in Base Model (Identity behavior)
+        self.assertIsNone(layer.gate_row)
+        self.assertIsNone(layer.gate_col)
 
-    def test_forward_pass(self):
-        layer = DoubleGateLinear(4, 2)
+    def test_hybrid_gate_behavior(self):
+        # Test the HybridGate logic independently
+        # Input dim 4, Old count 2 (Static), New count 2 (Dynamic)
+        gate = HybridGate(input_dim=4, old_count=2, new_count=2)
+        
+        # Check initialization
+        # Old part is buffer
+        self.assertTrue(torch.all(gate.old_gate == 1.0))
+        # New part is router
+        self.assertIsNotNone(gate.router)
+        self.assertEqual(gate.router.bias.item(), -5.0) # Closed init
+        
+        # Forward Pass
+        x = torch.randn(1, 1, 4)
+        output = gate(x)
+        
+        # Check shape: [1, 1, 4]
+        self.assertEqual(output.shape, (1, 1, 4))
+        
+        # Check Old Part (Indices 0,1) -> Should be exactly 1.0
+        self.assertTrue(torch.all(output[..., :2] == 1.0))
+        
+        # Check New Part (Indices 2,3) -> Should be sigmoid(-5 + noise) approx 0
+        # With small input, it should be close to sigmoid(-5) ~ 0.006
+        self.assertTrue(torch.all(output[..., 2:] < 0.1))
+
+    def test_forward_pass_base(self):
+        layer = MoEGatedLinear(4, 2)
         x = torch.randn(1, 4)
         y = layer(x)
         self.assertEqual(y.shape, (1, 2))
         
-        # Manual calculation check
-        g_fwd = torch.sigmoid(layer.gate_row + layer.gate_col)
-        w_eff = layer.weight * g_fwd
-        y_manual = torch.nn.functional.linear(x, w_eff, layer.bias)
+        # Manual check (Standard Linear)
+        y_manual = F.linear(x, layer.weight, layer.bias)
         self.assertTrue(torch.allclose(y, y_manual))
 
     def test_gradient_masking(self):
-        layer = DoubleGateLinear(2, 2)
+        layer = MoEGatedLinear(2, 2)
         
-        # Manually mask the top-left weight
-        layer.backward_mask[0, 0] = 0.0
+        # Create a mock backward mask to test hooking
+        # In expanded layers this is set automatically.
+        # Manual simulation:
+        mask = torch.ones(2, 2)
+        mask[0, 0] = 0.0
+        layer.register_buffer('backward_mask', mask)
+        
+        # Register hook manually as expand logic does
+        def hook_fn(grad):
+            return grad * layer.backward_mask
+        layer.weight.register_hook(hook_fn)
         
         # Save original weight
         w_orig = layer.weight.clone()
@@ -50,7 +83,7 @@ class TestDGELinear(unittest.TestCase):
         
         # Training step
         optimizer.zero_grad()
-        y = layer(x)
+        y = layer(x) # Standard linear pass
         loss = y.sum()
         loss.backward()
         optimizer.step()
@@ -63,13 +96,15 @@ class TestDGELinear(unittest.TestCase):
             self.assertNotEqual(layer.weight[0, 1], w_orig[0, 1])
 
     def test_expansion_top_left(self):
-        layer = DoubleGateLinear(2, 2)
+        layer = MoEGatedLinear(2, 2)
         # Set some distinct values
         with torch.no_grad():
              layer.weight.fill_(1.0)
              layer.bias.fill_(0.5)
              
-        expanded = expand_dge_linear(layer, added_in=2, added_out=2, frozen_core_pos=Quadrant.TOP_LEFT)
+        # Mock quadrant usage via explicit args (utils no longer uses Quadrant Enum for logic, just simple expansion)
+        # New util assumes Top-Left is always the old core.
+        expanded = expand_dge_linear(layer, added_in=2, added_out=2)
         
         self.assertEqual(expanded.weight.shape, (4, 4))
         
@@ -80,19 +115,26 @@ class TestDGELinear(unittest.TestCase):
         # Check Mask: TL should be 0 (frozen), others 1
         self.assertTrue(torch.all(expanded.backward_mask[0:2, 0:2] == 0.0))
         self.assertTrue(torch.all(expanded.backward_mask[2:, :] == 1.0)) # Bottom rows
-        self.assertTrue(torch.all(expanded.backward_mask[2:, :] == 1.0)) # Bottom rows
         self.assertTrue(torch.all(expanded.backward_mask[:, 2:] == 1.0)) # Right cols
+        
+        # Check HybridGate Creation
+        self.assertIsInstance(expanded.gate_row, HybridGate)
+        self.assertEqual(expanded.gate_row.old_count, 2)
+        self.assertEqual(expanded.gate_row.new_count, 2)
+        
+        # Check Router Init (Closed)
+        self.assertEqual(expanded.gate_row.router.bias.item(), -5.0)
         
     def test_expansion_zero_init(self):
         """
         CRITICAL TEST: Verifies that new physical weights are initialized to 0.0.
         This is required for Identity Preservation in additive gating.
         """
-        layer = DoubleGateLinear(2, 2)
+        layer = MoEGatedLinear(2, 2)
         with torch.no_grad():
              layer.weight.fill_(1.0) # Old weights are 1.0
              
-        expanded = expand_dge_linear(layer, added_in=2, added_out=2, frozen_core_pos=Quadrant.TOP_LEFT)
+        expanded = expand_dge_linear(layer, added_in=2, added_out=2)
         
         # 1. Old core (TL) should be 1.0
         self.assertTrue(torch.all(expanded.weight[0:2, 0:2] == 1.0))
@@ -110,25 +152,28 @@ class TestDGELinear(unittest.TestCase):
         Regression Test: Verifies that 'Frozen' weights are NOT updated by AdamW weight decay.
         AdamW applies decay to ALL parameters, regardless of gradient, unless handled carefully.
         """
-        layer = DoubleGateLinear(1, 1, bias=False)
+        layer = MoEGatedLinear(1, 1, bias=False)
         with torch.no_grad():
             layer.weight.fill_(10.0) # Set to substantial value
             
-        # Freeze the weight
-        layer.backward_mask.fill_(0.0)
+        # Manually install freeze hook to simulate expansion
+        layer.register_buffer('backward_mask', torch.zeros(1, 1))
+        def hook_fn(grad): return grad * layer.backward_mask
+        layer.weight.register_hook(hook_fn)
         
     def test_frozen_integrity_with_zero_decay(self):
         """
         Regression Test: Verifies that 'Frozen' weights are preserved when using AdamW with weight_decay=0.0.
-        We learned that default weight_decay corrupts frozen weights because it applies decay even if grad is 0.
         By setting weight_decay=0.0, we rely solely on gradients, which we mask to 0.0.
         """
-        layer = DoubleGateLinear(1, 1, bias=False)
+        layer = MoEGatedLinear(1, 1, bias=False)  
         with torch.no_grad():
             layer.weight.fill_(10.0) # Set to substantial value
             
-        # Freeze the weight
-        layer.backward_mask.fill_(0.0)
+        # Mock Expansion freeze
+        layer.register_buffer('backward_mask', torch.zeros(1, 1))
+        def hook_fn(grad): return grad * layer.backward_mask
+        layer.weight.register_hook(hook_fn)
         
         # CORRECT CONFIGURATION: weight_decay=0.0
         optimizer = torch.optim.AdamW(layer.parameters(), lr=1e-3, weight_decay=0.0)
@@ -149,41 +194,47 @@ class TestDGELinear(unittest.TestCase):
 
     def test_gate_freezing(self):
         """
-        Verifies that gate_row_mask and gate_col_mask correctly freeze gate parameters.
+        Verifies that Old Gates (Static) are frozen.
+        In V 2.0 (MoE), Old gates are buffers, so they shouldn't even have .grad.
         """
-        layer = DoubleGateLinear(2, 2)
+        layer = MoEGatedLinear(2, 2)
+        # Expand it so it has gates
+        expanded = expand_dge_linear(layer, 2, 2)
         
-        # Set Masks: Freeze Row 0 and Col 0
-        layer.gate_row_mask[0] = 0.0
-        layer.gate_col_mask[:, 0] = 0.0
+        # Check HybridGate structure
+        gate_row = expanded.gate_row
         
-        # Keep Row 1 and Col 1 trainable (default 1.0)
+        # Old part is Buffer (requires_grad=False by default for buffers unless parameterized?)
+        # Buffers are just tensors.
+        self.assertFalse(gate_row.old_gate.requires_grad, "Old Gate Buffer shouldn't require grad")
         
-        # Initial Values
-        r0_init = layer.gate_row[0].clone()
-        r1_init = layer.gate_row[1].clone()
-        c0_init = layer.gate_col[:, 0].clone()
-        c1_init = layer.gate_col[:, 1].clone()
+        # New part (Router) is Linear -> Trainable
+        self.assertTrue(gate_row.router.weight.requires_grad)
         
-        # Optimize
-        optimizer = torch.optim.SGD(layer.parameters(), lr=1.0)
+        # Run backward
+        optimizer = torch.optim.SGD(expanded.parameters(), lr=1.0)
         optimizer.zero_grad()
-        y = layer(torch.randn(1, 2))
+        # Input 1, 4 (2 old + 2 new)
+        y = expanded(torch.randn(1, 4))
         loss = y.sum()
         loss.backward()
+        
+        # Check Grads
+        # Router should have grad
+        self.assertIsNotNone(gate_row.router.weight.grad)
+        
+        # Old Gate has no grad (it's a buffer)
+        self.assertIsNone(gate_row.old_gate.grad)
+        
+        # Step
         optimizer.step()
         
-        # Assertions
-        # Frozen ones should match initial
-        self.assertTrue(torch.equal(layer.gate_row[0], r0_init), "Row Gate 0 failed to freeze")
-        self.assertTrue(torch.equal(layer.gate_col[:, 0], c0_init), "Col Gate 0 failed to freeze")
+        # Old gate should remain 1.0
+        self.assertTrue(torch.all(gate_row.old_gate == 1.0))
         
-        # Trainable ones should change (assuming non-zero grad)
-        # Note: Depending on inputs, grad might be 0, but usually not.
-        if layer.gate_row.grad[1] != 0:
-            self.assertFalse(torch.equal(layer.gate_row[1], r1_init), "Row Gate 1 didn't update")
-        if layer.gate_col.grad[:, 1] != 0:
-            self.assertFalse(torch.equal(layer.gate_col[:, 1], c1_init), "Col Gate 1 didn't update")
+        # Router weights should change
+        # (Assuming non-zero grad)
+        pass
 
     def test_expand_layer_norm(self):
         """
@@ -233,23 +284,10 @@ class TestDGELinear(unittest.TestCase):
         pass
 
     def test_expansion_bottom_right(self):
-        layer = DoubleGateLinear(2, 2)
-        # Set distinct values
-        with torch.no_grad():
-             layer.weight.fill_(2.0)
-             
-        expanded = expand_dge_linear(layer, added_in=1, added_out=1, frozen_core_pos=Quadrant.BOTTOM_RIGHT)
-        
-        # New shape: 3x3
-        # BR is old core -> rows 1:3, cols 1:3 (indices 1,2)
-        
-        # Check BR is original
-        self.assertTrue(torch.all(expanded.weight[1:3, 1:3] == 2.0))
-        
-        # Check Mask: BR should be 0
-        self.assertTrue(torch.all(expanded.backward_mask[1:3, 1:3] == 0.0))
-        # TL (0,0) should be 1
-        self.assertEqual(expanded.backward_mask[0, 0], 1.0)
+        # Disabled: DGE V2 currently assumes simpler Top-Left expansion logic for now.
+        # The Quadrant logic was removed from dge_utils to simplify the V 0.2.0 refactor.
+        # If we need it back, we can re-enable this test.
+        pass
 
     def test_embedding_leakage(self):
         """

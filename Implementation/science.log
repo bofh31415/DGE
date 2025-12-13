@@ -142,9 +142,83 @@ The new embedding parameters were technically trainable, but received zero signa
 FIX (V 0.1.1):
 - Changed `expand_embedding` initialization for new columns to `nn.init.normal_(std=0.02)`.
 - Use small random noise instead of zero.
-- Identity is maintained because the *Linear Layers* consuming these embeddings are still Zero-Initialized.
+   - But Hidden Layers are block-diagonal (Sidecar). Inputs to Old Core are frozen outputs of previous Old Core.
+   - The entire A-path is physically insulated.
 
+[2025-12-13 21:58:00] V 0.1.5 Result: CATASTROPHIC FAILURE (Paradox)
 --------------------------------------------------------------------------------
+Forensics were CLEAN (Frozen Grads = 0.000).
+Initialization was PERFECT (ID Delta = 0.0).
+Result:
+- Count Up (Skill A): **2.65%** (DESTROYED)
+- Count Down (Skill B): **40.53%** (LEARNING)
+
+ANALYSIS:
+We have a "Ghost in the Shell". parameters are frozen, but the function is destroyed.
+How can $f(x)$ change if $W$ doesn't change?
+Answer: The **Context** changed.
+
+Suspect #1: **LayerNorm Coupling**
+- Standard LN: $y = \frac{x - \mu}{\sigma} \gamma + \beta$
+- Statistics $\mu, \sigma$ are computed over the *entire* dimension $d_{model}$.
+- When we expanded: $x_{new} = [x_{old}, x_{sidecar}]$.
+- Initially $x_{sidecar} \approx 0$, so $\mu, \sigma$ are unchanged.
+- As Task B trains, $x_{sidecar}$ becomes active.
+- This SHIFTS $\mu$ and $\sigma$ for the entire vector.
+- The Old Core receives $x_{old}$ scaled by the *new* global statistics.
+- This corrupts the amplitude/offset of the signal. The frozen weights $W_{old}$ receive garbage.
+
+Suspect #2: **Softmax Competition**
+- $P(A) = \frac{e^{A}}{e^{A} + e^{B}}$
+- If $B$ logits grow large (even on A's inputs, due to bias leaks or cross-talk through LN), A's probability vanishes.
+
+Next Step:
+Verify LayerNorm hypothesis. We might need   - This CORRUPTS the "Frozen Core" functionally.
+   - Fix: `SplitLayerNorm` to decouple statistics.
+
+[2025-12-13 22:05:00] V 0.1.6 Result: THE FINAL BARRIER (Static Gating)
+--------------------------------------------------------------------------------
+Architecture: DGE with Block Diagonal + Frozen Bias + Split LayerNorm.
+Forensics (Run `dge_val_20251213_215717`):
+- `Frozen_Weight_Grad`: **0.000000000** (PASS)
+- `Frozen_Bias_Grad`:   **0.000000000** (PASS)
+- `Frozen_Head_Grad`:   **0.000000000** (PASS)
+- `Frozen_Grad_Norm`:   **0.000000000** (PASS)
+
+Parameters are absolutely frozen. Function implies isolated normalization.
+Result:
+- Skill A: **0.03%** (Acc < Random Chance).
+- Skill B: **100.00%**.
+
+ANALYSIS:
+The failure is **Interference by Additive Superposition**.
+Equation: $Y(x) = Y_{Old}(x) + Y_{New}(x)$
+In our implementation, the Gates ($g_{row}, g_{col}$) are **STATIC Parameters**.
+They are optimized once and fixed. They define a static topology (Sidecar Mode).
+The Sidecar is **Always On** for any input that passes through the network.
+
+Critically: **Skill A and Skill B share the same vocabulary (Token IDs)**.
+When we input a sequence for Skill A (e.g., "1 2 3"), the *Embeddings* produce vectors.
+Since the embeddings are shared (rows), the Sidecar receives this input.
+The Sidecar processes it. Since the Sidecar was trained on Skill B ("Count Down"), it sees "1 2 3" and predicts "2" (Down) or output relevant to B.
+$Y_{Old}$ predicts "4" (Up).
+$Y_{New}$ predicts "2" (Down).
+The Head sums them: $Logits = L_{Old} + L_{New}$.
+Since Skill B is fresh and optimized (Loss 0.009), its logits $L_{New}$ are likely larger/sharper than $L_{Old}$.
+Result: The model confidently predicts B's answer.
+
+CONCLUSION:
+We have hit the limit of "Static Expansion".
+You cannot have two conflicting skills on the same domain (tokens) active simultaneously in an additive architecture.
+We effectively built a "Schizo-Model" that hears two voices at once.
+
+SOLUTION (V 0.2.0):
+**Input-Dependent Gating (Mixture of Experts)**.
+The Gates must be dynamic: $G(x) = \sigma(W_{gate} \cdot x)$.
+If the input context looks like Skill A, $G_{New}(x) \to 0$.
+If the input context looks like Skill B, $G_{New}(x) \to 1$.
+This "Routing" is the only way to satisfy Reviewer Point 3.2.
+----------------------------------------------------------------------------------
 [2025-12-13 21:20:00] V 0.1.2: The Double-Lock (Vanishing Gradient)
 --------------------------------------------------------------------------------
 PROBLEM:
@@ -168,5 +242,81 @@ FIX (V 0.1.2):
     - Identity is Preserved: $y = W_{old}x + 0.0 \times 1.0 = y_{old}$.
     - Gradients Flow: The open gate allowing full gradient signal to reach $W_{new}$ immediately. $W_{new}$ moves away from 0, and learning begins.
 
-This configuration (Open Gates + Zero Weights) is the theoretically correct starting state for additive expansion.
+
+--------------------------------------------------------------------------------
+[2025-12-13 21:30:00] V 0.1.3: Block-Diagonal Isolation (The Head Leak)
+--------------------------------------------------------------------------------
+PROBLEM:
+Implemented strict Block-Diagonal Isolation (`isolate_cross_terms=True`) for all hidden layers.
+Results:
+- `Frozen_Grad_Norm` = 0.000000000 (Hidden Layers are perfectly sealed).
+- `Active_Grad_Norm` = High (Skill B learns well: 90%).
+- Skill A Accuracy = 0.53% (Total Failure).
+
+ANALYSIS:
+If the Input is frozen (embedded hooks), and Hidden Layers are isolated (sidecar), the only remaining shared component is the **LM HEAD**.
+$$ \text{Logits} = \text{LayerNorm}(h_{final}) \cdot W_{head}^T $$
+$W_{head}$ has shape `[d_model, vocab_size]`.
+During expansion, we increased `d_model` (added columns to $W_{head}$).
+However, the `vocab_size` (rows of the output matrix) remains constant.
+Both Skill A and Skill B predict tokens from the same vocabulary.
+When training Skill B:
+1. $h_{final}$ contains valid B-features and (allegedly) valid A-features.
+2. The optimizer updates $W_{head}$ to map B-features to B-tokens.
+3. Crucially, if B uses token "7", it updates the embedding vector for "7" in $W_{head}$.
+4. This overwrites the vector that Skill A relied on to predict "7".
+Since there is no "New 7" vs "Old 7" in a shared vocabulary, the output representations are destructive.
+
+CONCLUSION:
+**The Shared Head is the bottleneck.**
+Block-Diagonal Hidden Layers are insufficient if they converge into a destructive Shared Head.
+We must isolate the Readout Layer.
+
+PROPOSAL (V 0.2.0):
+We need **Projected Head Expansion** or **Task-Specific Heads**.
+Since DGE aims to be a single model:
+- We can expand the Head's input dimension (done).
+- We must mask the *gradients* to the Old Head Columns? No, that freezes the readout for A, which is good.
+- Wait, if we freeze Old Head Columns, A is safe.
+- Did `expand_dge_linear` isolate the Head?
+- The Head is a standard `nn.Linear` (usually), or `DGE`?
+- In `DGEBlock`, we used `expand_dge_linear`.
+- In `DGESimpleTransformer`, `self.lm_head` is an `nn.Linear`.
+- `expand_model` does:
+```python
+new_head = nn.Linear(new_full_dim, vocab_size, bias=False)
+new_head.weight.data[:, :old_dim] = old_head.weight.data
+```
+**IT DOES NOT REGISTER HOOKS TO FREEZE THE OLD COLUMNS OF THE HEAD.**
+The Head is a standard Linear layer (not DGE). It has no `backward_mask`.
+Therefore, gradients from B flow into `head.weight[:, :old_dim]`, destroying A's readout.
+
+FIX:
+Apply `register_hook` to the Head Weight to freeze the old columns (similar to Embeddings).
+--------------------------------------------------------------------------------
+[2025-12-13 21:40:00] V 0.1.4 -> V 0.1.5: The Hidden Bias Leak
+--------------------------------------------------------------------------------
+PROBLEM:
+Ran V 0.1.4 (Head Isolation).
+Results:
+- Skill A Accuracy = 0.12% (Still Failing).
+- Head was isolated. Embeddings were isolated. Weights/Gates were isolated.
+
+ANALYSIS:
+Deep dive into `dge_utils.py` revealed that `expand_dge_linear`:
+1. Copies the `bias` from Old to New.
+2. Registers hooks for `weight`, `gate_row`, `gate_col`.
+3. **DOES NOT register a hook for `bias`.**
+
+Consequence:
+When we expand the Output Dimension (Sidecar Mode), we just append new rows.
+The `bias` vector grows. `bias[0:old_out]` belongs to Skill A's block.
+Skill B's gradients flow through the ENTIRE layer (via `bias` vector summation in `F.linear`).
+Since `bias` had no hook, Skill B optimized the *entire* bias vector, shifting the activation baseline for Skill A's frozen block.
+This corrupted the features before they even reached the isolated Head.
+
+FIX (V 0.1.5):
+Added explicit Bias Freezing logic to `expand_dge_linear`.
+Now registers `frozen_bias_mask` and a hook on `new_layer.bias`.
+--------------------------------------------------------------------------------
 --------------------------------------------------------------------------------

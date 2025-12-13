@@ -31,7 +31,13 @@ class DGELogger:
                     'Loss', 
                     'Perplexity', 
                     'Memory_MB', 
-                    'Frozen_Grad_Norm', 
+                    'Memory_MB', 
+                    'Frozen_Grad_Norm', # Aggregate logic (Still present for backward compat/quick scan)
+                    'Frozen_Weight_Grad',
+                    'Frozen_Bias_Grad',
+                    'Frozen_Head_Grad',
+                    'Gate_Grad_Norm',
+                    'Max_Gate_Mag',
                     'Active_Grad_Norm'
                 ])
         
@@ -77,6 +83,12 @@ class DGELogger:
                 f"{loss:.6f}", 
                 f"{perplexity:.6f}", 
                 f"{memory_mb:.2f}",
-                f"{frozen_norm:.9f}", 
+                f"{memory_mb:.2f}",
+                f"{frozen_norm:.9f}",
+                f"{metrics.get('frozen_weight_grad', 0.0):.9f}",
+                f"{metrics.get('frozen_bias_grad', 0.0):.9f}",
+                f"{metrics.get('frozen_head_grad', 0.0):.9f}",
+                f"{metrics.get('gate_grad_norm', 0.0):.9f}",
+                f"{metrics.get('max_gate_mag', 0.0):.4f}",
                 f"{active_norm:.6f}"
             ])
