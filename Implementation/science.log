@@ -26,8 +26,61 @@ Where $r_i$ is the row gate (output dim) and $c_j$ is the column gate (input dim
 If the new weights $W_{new}$ at this intersection are initialized randomly (e.g., Kaiming or Xavier initialization), they instantly inject effectively 50% of that random noise into the pre-trained output activations. This signal-to-noise ratio degradation destroys the existing manifold representation immediately.
 
 ### Critical Requirement: Zero-Initialization
-Because we cannot guarantee that $r_{old} + c_{new} \ll 0$ for all trained $r_{old}$, we cannot rely on gates alone for "Identity Preservation" at the moment of expansion.
+- Added Unit Test `test_expansion_zero_init` which confirmed that random noise was indeed being introduced.
+- Updated `dge_utils.py` to use `nn.init.constant_(new_layer.weight, 0.0)`.
+- Verified 100% Identity Preservation immediately after expansion.
+--------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+[2025-12-13 20:45:00] CRITICAL DISCOVERY: The Shared Gate Leakage
+--------------------------------------------------------------------------------
+PROBLEM:
+Even with perfect Weight Masking ($G_{bwd} = 0$), we observed 100% Catastrophic Forgetting of Skill A after training Skill B.
+Investigation revealed that while the *Weights* were frozen, the *Gates* ($g_{row}, g_{col}$) remained trainable.
+
+MECHANISM OF FAILURE:
+1. DoubleGateLinear uses shared gate vectors: $W_{eff} = W \odot \sigma(g_{row} + g_{col})$.
+2. When expanding, we added new rows/cols but kept the old gate parameters as part of the new vectors.
+3. During Skill B training, the optimizer updated $g_{row}$ and $g_{col}$ to minimize Loss B.
+4. Since these gates are *shared* with the locked weights of Skill A, changing them altered the effective weights of Skill A ($W_{eff}^A$).
+5. $W_{eff}^A$ drifted significantly, destroying the memory.
+
+ADDITIONAL FACTOR: AdamW Weight Decay
+1. AdamW applies decay to *all* parameters, even if their gradient is masked to 0.
+2. This caused a slow "erosion" of the frozen static weights over time.
+
+SOLUTION:
+1. **Gate Freezing**: Implemented `gate_row_mask` and `gate_col_mask`.
+   - We now strictly freeze the segments of the gate vectors corresponding to the old task.
+   - Skill B can only change gates for *new* rows/cols or *new* interactions, not old ones.
+2. **Disable Weight Decay**:
+   - Set `weight_decay=0.0` for the optimizer.
+   - We rely solely on Gradient Masking for regularization/freezing.
+
+VERIFICATION:
+- Unit Test `test_frozen_integrity_with_zero_decay` confirmed weight stability.
+- Unit Test `test_gate_freezing` confirmed gate vector segment stability.
+- Forensic Logging `Frozen_Grad_Norm` now tracks both weight and gate drifts.
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+[2025-12-13 20:55:00] CRITICAL DISCOVERY: LayerNorm Reset (The Paradox)
+--------------------------------------------------------------------------------
+PROBLEM:
+Validation Run `dge_val_20251213_204116` showed:
+- `Frozen_Grad_Norm` = 0.000 (Perfect Freezing)
+- Skill A Accuracy = 0.03% (Total Failure)
+
+ANALYSIS:
+The forensic logs proved that the Core Weights and Gates were NOT modified by the optimizer.
+Therefore, the function mapping failed due to a change in the *Context* or *Distribution* of activations.
+Found: `DGEBlock.expand` was executing `self.ln1 = nn.LayerNorm(self.d_model)`.
+This RE-INITIALIZES the LayerNorm, discarding the learned $\gamma$ (scale) and $\beta$ (shift) parameters.
+Since the frozen core expects a specific input distribution (shaped by the old LN), feeding it un-scaled/un-shifted features results in garbage outputs.
+
+SOLUTION:
+Implement `expand_layer_norm` to copy the old $\gamma$ and $\beta$ to the valid indices of the new LayerNorm.
+--------------------------------------------------------------------------------
 **Solution**:
 We must decouple the *potential* for flow (Gates) from the *actual* flow (Weights).
 $$ W_{new\_physical} \leftarrow 0.0 $$
@@ -40,3 +93,80 @@ This restores perfect Identity Preservation ($f_{t+1}(x) = f_t(x)$) regardless o
 
 ### Conclusion
 **Random initialization is forbidden for DGE expansion areas.** Zero-initialization is a hard requirement for the stability of the additive double-gate topology.
+
+--------------------------------------------------------------------------------
+[2025-12-13 21:00:00] CRITICAL DISCOVERY: Embedding Amnesia (The Final Leak)
+--------------------------------------------------------------------------------
+PROBLEM:
+Validation Run `dge_val_20251213_205843` (after LayerNorm fix) showed:
+- `Frozen_Grad_Norm` = 0.000 (Global Zero!)
+- Skill A Accuracy = 0.06% (Still failing)
+
+ANALYSIS:
+If the core weights, gates, and LayerNorms are mathematically frozen (proven by grad norm), and the model still forgets, the only remaining variable is the **INPUT**.
+In `DGESimpleTransformer`, inputs come from:
+1. `token_emb` (nn.Embedding)
+2. `pos_emb` (nn.Parameter)
+These were being expanded by *copying* weights, but NOT *freezing* the old columns.
+Since Skill B uses tokens that overlap with Skill A (e.g., numbers, common words), the optimizer updated the shared vector representations.
+Input drift + Frozen Core = Garbage Output.
+
+VERIFICATION:
+- Created unit test `test_embedding_leakage`.
+- Confirmed that without hooks, gradients flow into the "old" columns of an expanded embedding.
+
+SOLUTION:
+- Implemented `expand_embedding` and `expand_parameter` in `dge_utils.py`.
+- These functions register a backward hook that physically masks gradients for the first $d_{old}$ columns.
+- Re-ran `test_embedding_leakage`: Passed (Grad Norm 0.0).
+
+STATUS:
+- Version bumped to `V 0.1.0` (Testing Phase).
+- All known leaks (Weight Decay, Gates, LayerNorms, Embeddings) are now patched.
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+[2025-12-13 21:15:00] V 0.1.1: The Dead Gradient (Initialization Bug)
+--------------------------------------------------------------------------------
+PROBLEM:
+After fixing input leakage (V 0.1.0), Skill A retention improved (34%), but Skill B FAILED to learn (3% Accuracy).
+Investigation of `training.csv` showed `Active_Grad_Norm` was healthy (~0.2), but the model wouldn't converge.
+
+ROOT CAUSE:
+In `expand_embedding`, I implemented Identity Preservation for new columns by setting them to `0.0`.
+However, Gradients for an Embedding are proportional to the input vector value.
+$$ \frac{\partial L}{\partial W} \propto \dots \times x $$
+If $x = 0$, then Gradient = 0.
+The new embedding parameters were technically trainable, but received zero signal because they were initialized to void.
+
+FIX (V 0.1.1):
+- Changed `expand_embedding` initialization for new columns to `nn.init.normal_(std=0.02)`.
+- Use small random noise instead of zero.
+- Identity is maintained because the *Linear Layers* consuming these embeddings are still Zero-Initialized.
+
+--------------------------------------------------------------------------------
+[2025-12-13 21:20:00] V 0.1.2: The Double-Lock (Vanishing Gradient)
+--------------------------------------------------------------------------------
+PROBLEM:
+Even with noise initialization (V 0.1.1), Skill B performance remained poor (~3.5%).
+Forensic Log showed `Active_Grad_Norm` dropping to extremely low levels (~0.04).
+
+ROOT CAUSE:
+The default DGE strategy for expansion was:
+1. Initialize New Weights ($W_{new}$) to `0.0` (for Identity).
+2. Initialize New Gates ($G_{new}$) to `-5.0` (Closed, for Identity).
+
+This created a "Double-Lock":
+- To update $W_{new}$, gradients must pass through the Gate ($Gradient \times \sigma(G)$). If Gate is closed ($\sigma \approx 0$), W doesn't learn.
+- To update $G_{new}$, gradients must depend on the magnitude of $W_{new}$. If $W=0$, G doesn't learn.
+Result: The new capacity was strangled.
+
+FIX (V 0.1.2):
+- **Open the Gates**: Changed `expand_dge_linear` gate initialization from `-5.0` to `2.5` (Open, $\sigma \approx 0.99$).
+- **Keep Weights Zero**: $W_{new} = 0.0$.
+- Effect:
+    - Identity is Preserved: $y = W_{old}x + 0.0 \times 1.0 = y_{old}$.
+    - Gradients Flow: The open gate allowing full gradient signal to reach $W_{new}$ immediately. $W_{new}$ moves away from 0, and learning begins.
+
+This configuration (Open Gates + Zero Weights) is the theoretically correct starting state for additive expansion.
+--------------------------------------------------------------------------------

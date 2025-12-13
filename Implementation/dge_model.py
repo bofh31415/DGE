@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from dge_linear import DoubleGateLinear
-from dge_utils import expand_dge_linear, Quadrant
+from dge_utils import expand_dge_linear, expand_layer_norm, expand_embedding, expand_parameter, Quadrant
 
 class DGEBlock(nn.Module):
     def __init__(self, d_model, n_head):
@@ -74,18 +74,21 @@ class DGEBlock(nn.Module):
         # For a proper LAB demo of DGE mechanics, standard linear expansion is fine to show GATING.
         # We will keep it simple.
         
-        self.w_qkv = expand_dge_linear(self.w_qkv, added_in=added_width, added_out=3*added_width, frozen_core_pos=quadrant)
-        self.w_o = expand_dge_linear(self.w_o, added_in=added_width, added_out=added_width, frozen_core_pos=quadrant) # w_o input is dim but it's actually d_model. Careful.
-        # Wait, w_o input is d_model (proj from attn). Its output is d_model.
-        # So we expand both in and out.
+        # V 0.1.3: Enable Strict Isolation (Sidecar) to prevent Interference
+        iso = True
         
-        self.w_mlp_in = expand_dge_linear(self.w_mlp_in, added_in=added_width, added_out=4*added_width, frozen_core_pos=quadrant)
-        self.w_mlp_out = expand_dge_linear(self.w_mlp_out, added_in=4*added_width, added_out=added_width, frozen_core_pos=quadrant)
+        self.w_qkv = expand_dge_linear(self.w_qkv, added_in=added_width, added_out=3*added_width, frozen_core_pos=quadrant, isolate_cross_terms=iso)
+        self.w_o = expand_dge_linear(self.w_o, added_in=added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=iso) 
+        
+        self.w_mlp_in = expand_dge_linear(self.w_mlp_in, added_in=added_width, added_out=4*added_width, frozen_core_pos=quadrant, isolate_cross_terms=iso)
+        self.w_mlp_out = expand_dge_linear(self.w_mlp_out, added_in=4*added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=iso)
         
         self.d_model += added_width
         self.n_head = new_n_head # Update head count
-        self.ln1 = nn.LayerNorm(self.d_model) # LN params lost, simplified re-init
-        self.ln2 = nn.LayerNorm(self.d_model)
+        
+        # CRITICAL FIX: Preserve LayerNorm statistics!
+        self.ln1 = expand_layer_norm(self.ln1, added_width)
+        self.ln2 = expand_layer_norm(self.ln2, added_width)
 
 class DGESimpleTransformer(nn.Module):
     def __init__(self, vocab_size=1000, d_model=64, n_layer=2, n_head=4):
@@ -123,19 +126,11 @@ class DGESimpleTransformer(nn.Module):
         print(f"Expanding Model: {self.d_model} -> {new_d_model} (Heads: {self.layers[0].n_head} -> {new_n_head})")
         
         # Expand Embedding
-        # Embeddings are tricky with DGE as they are usually Lookup Tables.
-        # For this lab, we just re-init a larger embedding and copy weights manually to show concept.
-        old_emb = self.token_emb
-        self.token_emb = nn.Embedding(old_emb.num_embeddings, new_d_model)
-        with torch.no_grad():
-            self.token_emb.weight[:, :self.d_model] = old_emb.weight
-            
+        self.token_emb = expand_embedding(self.token_emb, added_d_model)
+
         # Resize Pos Emb
-        old_pos = self.pos_emb
-        self.pos_emb = nn.Parameter(torch.zeros(1, 128, new_d_model))
-        with torch.no_grad():
-            self.pos_emb[:, :, :self.d_model] = old_pos
-            
+        self.pos_emb = expand_parameter(self.pos_emb, added_d_model)
+
         # Expand Layers
         for i, layer in enumerate(self.layers):
             print(f"Expanding Layer {i}...")
@@ -171,8 +166,32 @@ class DGESimpleTransformer(nn.Module):
                 # Grads on active weights
                 active_grads = module.weight.grad * module.backward_mask
                 active_sq_sum += active_grads.norm().item() ** 2
+
+                # Gate Grads
+                # Check Row Gate drift
+                if module.gate_row.grad is not None:
+                    frozen_gate_row = module.gate_row.grad * (1 - module.gate_row_mask)
+                    frozen_sq_sum += frozen_gate_row.norm().item() ** 2
+
+                # Check Col Gate drift
+                if module.gate_col.grad is not None:
+                    frozen_gate_col = module.gate_col.grad * (1 - module.gate_col_mask)
+                    frozen_sq_sum += frozen_gate_col.norm().item() ** 2
+
+            elif isinstance(module, nn.LayerNorm):
+                # Check for frozen LayerNorm segments
+                # We expect expand_layer_norm to register a 'frozen_mask' buffer if partial freezing is active
+                if hasattr(module, 'frozen_mask'):
+                     if module.weight.grad is not None:
+                         frozen_w = module.weight.grad * module.frozen_mask
+                         frozen_sq_sum += frozen_w.norm().item() ** 2
+                     if module.bias.grad is not None:
+                         frozen_b = module.bias.grad * module.frozen_mask
+                         frozen_sq_sum += frozen_b.norm().item() ** 2
                 
         return {
             'frozen_grad_norm': frozen_sq_sum ** 0.5,
-            'active_grad_norm': active_sq_sum ** 0.5
+            'active_grad_norm': active_sq_sum ** 0.5,
+            # We could add specific gate metrics if needed, but bundling into frozen_grad_norm 
+            # is enough to trigger the "Wait, something frozen is moving" alarm.
         }

@@ -6,6 +6,7 @@ from dge_model import DGESimpleTransformer
 from dge_utils import Quadrant
 from dge_linear import DoubleGateLinear
 from dge_training import train_task, evaluate_task, TaskType
+from version import __version__
 from dge_logger import DGELogger
 import time
 import json
@@ -71,7 +72,8 @@ class DGELab:
         vocab_size = int(input("Enter vocab_size (default 1000): ") or 1000)
         
         self.model = DGESimpleTransformer(vocab_size=vocab_size, d_model=d_model, n_layer=n_layer, n_head=n_head)
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3)
+        # CRITICAL FIX: weight_decay=0.0 is required to prevent "decaying" frozen weights (which have 0 grad).
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
         self.model_name = name
         self.trained_skills = set() # Reset skills for new model
         self.global_step = 0 # Reset step
@@ -167,7 +169,8 @@ class DGELab:
                 self.logger.log_event("EXPANDED", model_state, step=self.global_step)
             
             # Re-init optimizer for new parameters
-            self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3)
+            # CRITICAL FIX: weight_decay=0.0 is required to prevent "decaying" frozen weights.
+            self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
             print("✅ Model expanded successfully.")
             
         except ValueError:
@@ -273,8 +276,50 @@ class DGELab:
             return
             
         print("Available Models:")
+        valid_models = []
         for i, m in enumerate(models):
-            print(f"{i+1}. {m}")
+            # Check if config.json exists to ensure it's a valid model directory
+            if os.path.exists(os.path.join(self.models_dir, m, 'config.json')):
+                print(f"{len(valid_models)+1}. {m}")
+                valid_models.append(m)
+            
+        if not valid_models:
+            print("❌ No valid models found (missing config.json).")
+            return
+
+        while True:
+            choice = input("\nSelect model to load (number) or 'b' to go back: ").strip().lower()
+            if choice == 'b':
+                return
+            
+            try:
+                choice = int(choice)
+                if 1 <= choice <= len(valid_models):
+                    break
+                else:
+                    print("❌ Invalid number.")
+            except ValueError:
+                print("❌ Invalid input. Please enter a number or 'b'.")
+
+        name = valid_models[choice-1]
+        self.load_model_by_name(name)
+
+    def load_model_by_name(self, name):
+        """
+        Loads the model state from disk.
+        Args:
+            name (str): Model name (directory name)
+        """
+        load_dir = os.path.join(self.models_dir, name)
+        
+        # Load Config
+        try:
+            with open(os.path.join(load_dir, 'config.json'), 'r') as f:
+                config = json.load(f)
+                
+            print(f"Loading model '{name}' with config: {config}")
+            
+            # Reconstruct Model
             vocab_size = config.get('vocab_size', 1000) # Default for legacy models
             self.model = DGESimpleTransformer(
                 vocab_size=vocab_size,
@@ -295,11 +340,12 @@ class DGELab:
             self.logger.log_event("LOADED", model_state, step=self.global_step)
             
             # Re-init optimizer
-            self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3)
-            print("Model loaded successfully.")
+            # CRITICAL FIX: weight_decay=0.0 is used here too for consistency
+            self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
+            print("✅ Model loaded successfully.")
             
         except (ValueError, FileNotFoundError) as e:
-            print(f"Error loading model: {e}")
+            print(f"❌ Error loading model: {e}")
 
     def inspect_model(self):
         if self.model is None:
@@ -423,7 +469,7 @@ class DGELab:
         vocab_size = 500  # Smaller vocab for faster convergence on simple tasks
         
         self.model = DGESimpleTransformer(vocab_size=vocab_size, d_model=d_model, n_layer=n_layer, n_head=n_head)
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3)
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
         self.trained_skills = set()
         self.global_step = 0
         os.makedirs(self.models_dir, exist_ok=True)
@@ -470,7 +516,7 @@ class DGELab:
             self.logger.log_event("EXPANDED", model_state, step=self.global_step)
             
         # Re-init optimizer
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3)
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
         
         # --- Step 5: Identity Check ---
         print("\n[Phase 5] Identity Verification (Checking Skill A post-expansion)...")
@@ -517,7 +563,7 @@ class DGELab:
         input("\nPress Enter to return to menu...")
 
     def run(self):
-        print("Welcome to DGE Lab 2.0 (Forensic & Checkpoint Edition)")
+        print(f"\nWelcome to DGE Lab {__version__} (Forensic & Checkpoint Edition)")
         while True:
             print("\n" + "="*50)
             print("🤖  DGE MAIN MENU")

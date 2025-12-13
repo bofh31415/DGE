@@ -78,20 +78,12 @@ class TestPersistence(unittest.TestCase):
         # Clear current model
         self.lab.model = None
         
-        # Mock user input for selection?
-        # Instead of calling load_model() which uses input(), we replicate logic or refactor.
-        # For unittest, let's just manually load using the logic we know.
+        # Load using the actual application logic
+        self.lab.load_model_by_name("UnitTestModel")
         
-        with open(os.path.join(save_path, 'config.json'), 'r') as f:
-            config = json.load(f)
-            
-        loaded_model = DGESimpleTransformer(
-            vocab_size=config.get('vocab_size'),
-            d_model=config['d_model'], 
-            n_layer=config['n_layer'], 
-            n_head=config['n_head']
-        )
-        loaded_model.load_state_dict(torch.load(os.path.join(save_path, 'weights.pt')))
+        loaded_model = self.lab.model
+        
+        self.assertIsNotNone(loaded_model)
         
         self.assertEqual(loaded_model.d_model, 16)
         self.assertEqual(loaded_model.token_emb.num_embeddings, 50)

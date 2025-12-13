@@ -36,10 +36,16 @@ class DoubleGateLinear(nn.Module):
         # Non-learnable buffer. 1 = trainable, 0 = frozen.
         self.register_buffer('backward_mask', torch.ones(out_features, in_features))
         
+        # Gate Backward Masks (Vectors)
+        self.register_buffer('gate_row_mask', torch.ones(out_features, 1))
+        self.register_buffer('gate_col_mask', torch.ones(1, in_features))
+        
         self.reset_parameters()
         
-        # Hook handle
+        # Hook handles
         self._hook_handle = None
+        self._gate_row_hook_handle = None
+        self._gate_col_hook_handle = None
         self._register_gradient_hook()
 
     def reset_parameters(self):
@@ -58,18 +64,33 @@ class DoubleGateLinear(nn.Module):
         
         # Reset backward mask to all ones
         self.backward_mask.fill_(1.0)
+        self.gate_row_mask.fill_(1.0)
+        self.gate_col_mask.fill_(1.0)
 
     def _register_gradient_hook(self):
         # Registers a hook on the weight parameter to mask gradients
         if self._hook_handle is not None:
             self._hook_handle.remove()
-            
+        if self._gate_row_hook_handle is not None:
+            self._gate_row_hook_handle.remove()
+        if self._gate_col_hook_handle is not None:
+            self._gate_col_hook_handle.remove()
+
         def hook(grad):
-            if grad is None:
-                return None
+            if grad is None: return None
             return grad * self.backward_mask
             
+        def hook_row(grad):
+            if grad is None: return None
+            return grad * self.gate_row_mask
+            
+        def hook_col(grad):
+            if grad is None: return None
+            return grad * self.gate_col_mask
+            
         self._hook_handle = self.weight.register_hook(hook)
+        self._gate_row_hook_handle = self.gate_row.register_hook(hook_row)
+        self._gate_col_hook_handle = self.gate_col.register_hook(hook_col)
 
     def get_forward_mask(self):
         """Computes G_fwd = sigmoid(gate_row + gate_col)"""

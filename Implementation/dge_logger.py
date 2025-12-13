@@ -1,6 +1,7 @@
 import os
 import json
 import csv
+from version import __version__
 from datetime import datetime
 import time
 
@@ -33,6 +34,11 @@ class DGELogger:
                     'Frozen_Grad_Norm', 
                     'Active_Grad_Norm'
                 ])
+        
+        # Log CREATED event
+        self.log_event("CREATED", {
+            "code_version": __version__
+        }, step=0)
 
     def log_event(self, event_type, details=None, step=0):
         """
