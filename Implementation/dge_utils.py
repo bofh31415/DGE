@@ -127,8 +127,10 @@ class HybridGate(nn.Module):
         # Dynamic New Segment (Router)
         if new_count > 0:
             self.router = nn.Linear(input_dim, new_count)
-            # Initialize to Closed (-5.0 bias)
-            nn.init.constant_(self.router.bias, -5.0)
+            # Initialize to Neutral/Open (0.0 bias -> 0.5 sigmoid) via V 0.2.6 Plan
+            # This combats the "Dead Gradient" problem where 0.0 Weights * Closed Gate = 0.0 Gradient
+            # With W=0.0, Identity is safe even if Gate is Open.
+            nn.init.constant_(self.router.bias, 0.0)
             nn.init.kaiming_uniform_(self.router.weight, a=math.sqrt(5))
         else:
             self.router = None
@@ -191,34 +193,7 @@ class MoEGatedLinear(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        # Standard Linear
-        out = F.linear(input, self.weight, self.bias)
-        
-        # Apply Gates if they exist
-        if self.gate_row is not None:
-            g_row = self.gate_row(input) 
-            out = out * g_row
-            
-        if self.gate_col is not None:
-            g_col = self.gate_col(input)
-            # Apply to output of linear? No, G_col is INPUT selection.
-            # DGE V1: x * g_col.
-            # If we apply g_col post-linear, it's weird.
-            # Wait, my previous plan was: 
-            # 1. g_col = gate_col(input)
-            # 2. x_gated = input * g_col
-            # 3. out = linear(x_gated)
-            
-            # But here I just coded "Standard Linear" first.
-            # Let's fix that order.
-            pass # See next block for fix logic
-            
-        return out
-        
-    def __call__(self, input):
-        # Override call to handle complex flow? No, forward is enough.
-        # Let's fix forward logic directly.
-        
+        # V 0.2.6: Fixed Forward Logic
         # 1. Col Gate (Input Selection)
         if self.gate_col is not None:
              g_col = self.gate_col(input)
@@ -231,7 +206,7 @@ class MoEGatedLinear(nn.Module):
         
         # 3. Row Gate (Output Selection)
         if self.gate_row is not None:
-             g_row = self.gate_row(input) # Router sees Raw Input! Critical for context.
+             g_row = self.gate_row(input) # Router sees Raw Input!
              out = out * g_row
              
         return out
