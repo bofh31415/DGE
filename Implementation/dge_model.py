@@ -1,7 +1,6 @@
-```python
 import torch
 import torch.nn as nn
-from dge_utils import expand_dge_linear, expand_layer_norm, expand_embedding, expand_parameter, expand_linear_and_freeze_old, MoEGatedLinear, HybridGate
+from dge_utils import expand_dge_linear, expand_layer_norm, expand_embedding, expand_parameter, expand_linear_and_freeze_old, MoEGatedLinear, HybridGate, Quadrant
 
 class DGEBlock(nn.Module):
     def __init__(self, d_model, n_head):
@@ -131,7 +130,7 @@ class DGESimpleTransformer(nn.Module):
         
         return logits, total_loss
 
-    def expand_model(self, added_d_model, quadrant=HybridGate.TOP_LEFT):
+    def expand_model(self, added_d_model, quadrant=Quadrant.TOP_LEFT):
         """Expands the entire model width."""
         current_head_dim = self.d_model // self.layers[0].n_head
         new_d_model = self.d_model + added_d_model
