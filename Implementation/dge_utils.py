@@ -127,10 +127,10 @@ class HybridGate(nn.Module):
         # Dynamic New Segment (Router)
         if new_count > 0:
             self.router = nn.Linear(input_dim, new_count)
-            # Initialize to Neutral/Open (0.0 bias -> 0.5 sigmoid) via V 0.2.6 Plan
-            # This combats the "Dead Gradient" problem where 0.0 Weights * Closed Gate = 0.0 Gradient
-            # With W=0.0, Identity is safe even if Gate is Open.
-            nn.init.constant_(self.router.bias, 0.0)
+            # Initialize to Closed (-4.0 bias -> ~1.8% open)
+            # V 0.2.7: Reverted to Closed to protect Skill A.
+            # Gradient flow is now guaranteed by Non-Zero W initialization (see expand_dge_linear).
+            nn.init.constant_(self.router.bias, -4.0)
             nn.init.kaiming_uniform_(self.router.weight, a=math.sqrt(5))
         else:
             self.router = None
@@ -278,10 +278,12 @@ def expand_dge_linear(
         if layer.bias is not None:
             new_layer.bias[:old_out] = layer.bias
             
-        # Initialize New Weights (Sidecar & Cross) to 0.0
-        # This ensures neutral start.
-        new_layer.weight[old_out:, :] = 0.0
-        new_layer.weight[:, old_in:] = 0.0
+        # Initialize New Weights (Sidecar & Cross) to Small Noise (V 0.2.7)
+        # We need Non-Zero weights to allow gradient flow to the Gate.
+        # dL/dGate = dL/dOut * Weight. If Weight=0, Gate cannot learn.
+        # With Gate=-4.0 (0.018), and Weight=1e-3, effective noise is 1e-5. Identity Safe.
+        nn.init.normal_(new_layer.weight[old_out:, :], mean=0.0, std=0.001)
+        nn.init.normal_(new_layer.weight[:, old_in:], mean=0.0, std=0.001)
         
         # Clean up bias for new rows
         if layer.bias is not None:
