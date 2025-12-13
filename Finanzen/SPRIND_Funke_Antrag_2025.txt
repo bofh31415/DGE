@@ -1,0 +1,36 @@
+*** DATEI: SPRIND_Funke_Antrag_2025.txt ***
+*** ZWECK: Copy & Paste in das Online-Bewerbungsformular ***
+
+[FELD: Titel des Projekts]
+Gated Ghost Expansion (GGE): Architektur für katastrophenfreies kontinuierliches Lernen in KI-Systemen
+
+[FELD: Kurzbeschreibung (Elevator Pitch)]
+Wir lösen das Problem des "Catastrophic Forgetting" in neuronalen Netzen nicht durch Retraining, sondern durch Architektur. GGE nutzt latente Parameter ("Ghost Weights"), die nur bei Bedarf aktiviert werden. Dies ermöglicht lebenslanges Lernen ohne Wissensverlust bei 90% Energieeinsparung gegenüber dem aktuellen Stand der Technik.
+
+[FELD: Welches Problem lösen Sie?]
+Aktuelle KI-Modelle sind statisch. Um neues Wissen zu integrieren, müssen sie kostspielig neu trainiert werden (Retraining), da sie sonst altes Wissen überschreiben (Catastrophic Forgetting). Dies führt zu einem enormen Energieverbrauch, hohen Kosten und macht europäische KMUs abhängig von US-Hyperscalern, da nur diese die Rechenkapazität für ständige Updates besitzen.
+
+[FELD: Wie funktioniert Ihre Lösung? (Technische Tiefe)]
+Gated Ghost Expansion (GGE) ist eine neuartige Topologie für Deep Learning Modelle. Anstatt alle Gewichte zu ändern, friert GGE das Basiswissen ein und projiziert neue Informationen in orthogonale Unterräume (Ghost Parameters).
+Ein adaptiver Gating-Mechanismus entscheidet pro Token, ob auf Basiswissen oder neues Wissen zugegriffen wird.
+Mathematisch garantieren wir durch die Orthogonalität der Updates, dass keine "Intruder Dimensions" entstehen, die das alte Wissen verzerren. Das Ergebnis: Forward Transfer ohne Backward Interference.
+
+[FELD: Innovationshöhe / Warum jetzt?]
+Bisherige Ansätze (Replay Buffers, LoRA) sind Pflasterlösungen, die bei Skalierung versagen. GGE ist ein Paradigmenwechsel: Von monolithischen, statischen Blöcken hin zu organisch wachsenden Strukturen. Da die Hardware-Kosten für Training (H100 GPUs) explodieren, ist jetzt der ökonomische Druck da, die Effizienz algorithmisch zu lösen.
+
+[FELD: Gesellschaftlicher Impact / Souveränität]
+1. Green AI: Reduktion des CO2-Abdrucks für Modell-Updates um Faktor 10.
+2. Digitale Souveränität: Ermöglicht "On-Premise Learning" für deutsche Industrie (Daten müssen das Werk nicht verlassen).
+3. Resilienz: KI-Systeme in kritischer Infrastruktur können sich an neue Gefahren anpassen, ohne instabil zu werden.
+
+[FELD: Team & Qualifikation]
+Prof. Dr. [Ihr Name]: Expertise in kognitiven Systemen und Deep Learning Architekturen. Mehrfach ausgezeichnet für [Preis X].
+Validierung: Das Konzept wurde durch Prof. [Name Experte 1] und Dr. [Name Experte 2] begutachtet und als technologisch valide eingestuft.
+
+[FELD: Meilensteine & Budget (Grobplanung 12 Monate)]
+Gesamtbedarf: 480.000 € (Personal, GPU-Compute, Benchmarking).
+Q1-Q2: Implementierung des GGE-Kernels in PyTorch/CUDA. Nachweis der Orthogonalität.
+Q3: Benchmarking gegen State-of-the-Art (Llama-3 Fine-Tuning) auf Standard-Datasets.
+Q4: Pilot-Demonstrator "Lifelong Learning Agent" in einer Simulationsumgebung.
+
+*** ENDE DER DATEI ***

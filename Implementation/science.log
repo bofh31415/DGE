@@ -1,0 +1,42 @@
+# DGE Architecture: Scientific Log
+This document tracks critical architectural insights, hypothesis validations, and implementation requirements for the Double Gate Extension (DGE) model.
+
+---
+
+## 2025-12-13: The Noise Injection Vulnerability in Additive Gating
+
+### Observation
+Upon expanding a pre-trained model (Task A trained) from `d_model=64` to `128` and training Task B, the performance on Task A dropped to 0.0% (Catastrophic Forgetting). This occurred despite:
+1.  Freezing the backward mask for old weights.
+2.  Initializing new gate parameters to negative values (`-5.0`) to theoretically close them.
+
+### Root Cause Analysis
+The DGE mechanism uses an additive gate structure: 
+$$ G_{ij} = \sigma(r_i + c_j) $$
+
+Where $r_i$ is the row gate (output dim) and $c_j$ is the column gate (input dim).
+1.  **State before expansion**: For active "Old" weights, $r_i$ is typically large positive (open).
+2.  **Expansion**: New inputs (columns) are added. We initialize new $c_j$ to `-5.0`.
+3.  **The Cross-Term Problem**: At the intersection of **Old Rows** and **New Columns**:
+    $$ G_{i, new} = \sigma(r_{old} + c_{new}) $$
+    If $r_{old} \approx +5.0$ and $c_{new} = -5.0$, then $r+c \approx 0$.
+    $$ \sigma(0) = 0.5 $$
+    **The gate is 50% OPEN.**
+
+If the new weights $W_{new}$ at this intersection are initialized randomly (e.g., Kaiming or Xavier initialization), they instantly inject effectively 50% of that random noise into the pre-trained output activations. This signal-to-noise ratio degradation destroys the existing manifold representation immediately.
+
+### Critical Requirement: Zero-Initialization
+Because we cannot guarantee that $r_{old} + c_{new} \ll 0$ for all trained $r_{old}$, we cannot rely on gates alone for "Identity Preservation" at the moment of expansion.
+
+**Solution**:
+We must decouple the *potential* for flow (Gates) from the *actual* flow (Weights).
+$$ W_{new\_physical} \leftarrow 0.0 $$
+
+By strictly initializing the physical weights of the new capacity to zero:
+$$ y = (W_{old} \odot G_{old})x + (0.0 \odot G_{new})x $$
+$$ y = y_{old} + 0 $$
+
+This restores perfect Identity Preservation ($f_{t+1}(x) = f_t(x)$) regardless of the gate states. Gradients can still flow into $W_{new}$ and $G_{new}$ to begin training, but the expansion starts from a neutral, non-destructive state.
+
+### Conclusion
+**Random initialization is forbidden for DGE expansion areas.** Zero-initialization is a hard requirement for the stability of the additive double-gate topology.

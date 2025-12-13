@@ -1,0 +1,309 @@
+\documentclass[a4paper, 11pt]{article}
+
+% === PACKAGES ===
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{tikz}
+\usetikzlibrary{matrix,positioning,arrows.meta,calc,shapes.geometric,patterns}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{array}
+
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+% === HEADER ===
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Patentanmeldung -- DGE-Verfahren}
+\lhead{Sven Jansen, Dipl.-Inf.}
+\cfoot{\thepage}
+
+\begin{document}
+
+% ============================================================================
+% DECKBLATT
+% ============================================================================
+\begin{center}
+\Large\textbf{PATENTANMELDUNG}\\[0.5cm]
+\large beim Deutschen Patent- und Markenamt (DPMA)\\[1cm]
+\end{center}
+
+\noindent\textbf{Bezeichnung der Erfindung:}\\
+\textit{Verfahren und Vorrichtung zur verlustfreien Erweiterung von Speicherstrukturen in neuronalen Netzwerken mittels dualer Gatter-Steuerung (DGE)}\\[0.5cm]
+
+\noindent\textbf{Anmelder:}\\
+Sven Jansen, Dipl.-Inf.\\
+[Adresse]\\[0.5cm]
+
+\noindent\textbf{Erfinder:}\\
+Sven Jansen, Dipl.-Inf.\\[0.5cm]
+
+\noindent\textbf{Technisches Gebiet:}\\
+Datenverarbeitungsverfahren -- Maschinelles Lernen -- Speicherverwaltung\\[1cm]
+
+\hrule
+\vspace{1cm}
+
+% ============================================================================
+% ZUSAMMENFASSUNG
+% ============================================================================
+\section*{Zusammenfassung}
+
+Die Erfindung betrifft ein \textbf{computerimplementiertes Verfahren} und eine zugehörige \textbf{Vorrichtung} zur dynamischen Erweiterung von Gewichtsmatrizen in künstlichen neuronalen Netzwerken, wobei die Integrität zuvor gespeicherter Daten mathematisch garantiert wird.
+
+Das Kernprinzip besteht in der Einführung von \textbf{zwei voneinander unabhängigen Sätzen von Steuerparametern} (nachfolgend ``Gatter'' genannt) für jede erweiterbare Speicherregion:
+
+\begin{enumerate}[label=(\alph*)]
+    \item \textbf{Mindestens ein erster Satz von Steuerparametern} (Vorwärts-Gatter), der die Sichtbarkeit der gespeicherten Werte während der Inferenzphase steuert.
+    \item \textbf{Mindestens ein zweiter, unabhängiger Satz von Steuerparametern} (Rückwärts-Gatter), der den Gradientenfluss während der Trainingsphase steuert und somit die Modifizierbarkeit der Werte kontrolliert.
+\end{enumerate}
+
+Diese Entkopplung ermöglicht es, gespeicherte Daten \emph{zu verwenden} (Vorwärts-Gatter offen) ohne sie \emph{zu modifizieren} (Rückwärts-Gatter geschlossen).
+
+\newpage
+
+% ============================================================================
+% BESCHREIBUNG
+% ============================================================================
+\section{Technischer Hintergrund}
+
+\subsection{Stand der Technik}
+
+Im Bereich des maschinellen Lernens besteht das fundamentale Problem des \textbf{katastrophalen Vergessens}: Wenn ein neuronales Netzwerk auf neue Daten trainiert wird, werden die Gewichte modifiziert, die zuvor gelernte Informationen kodieren. Dies führt zu einem Verlust der alten Fähigkeiten.
+
+Bestehende Lösungsansätze umfassen:
+\begin{itemize}
+    \item \textbf{Regularisierungsmethoden} (z.B. Elastic Weight Consolidation): Bestrafen Änderungen an ``wichtigen'' Gewichten durch einen Verlustterm.
+    \item \textbf{Replay-Methoden}: Mischen alter Daten mit neuen während des Trainings.
+    \item \textbf{Architekturmethoden}: Allokieren separater Kapazität für jede Aufgabe.
+\end{itemize}
+
+Diese Methoden bieten jedoch nur \emph{probabilistischen} Schutz. Es fehlt eine \textbf{architektonische Garantie}, die eine Modifikation geschützter Gewichte physikalisch unmöglich macht.
+
+\subsection{Aufgabe der Erfindung}
+
+Die Erfindung löst das Problem, indem sie einen \textbf{strukturellen Mechanismus} bereitstellt, der:
+\begin{enumerate}
+    \item Die Sichtbarkeit von Speicherinhalten während der Inferenz kontrolliert.
+    \item Die Modifizierbarkeit von Speicherinhalten während des Trainings unabhängig davon kontrolliert.
+    \item Eine mathematische Garantie für die Unversehrtheit gespeicherter Daten bietet.
+\end{enumerate}
+
+\newpage
+\section{Beschreibung der Erfindung}
+
+\subsection{Das Dual-Gatter-Prinzip}
+
+Für eine Speichermatrix $\mathbf{W} \in \mathbb{R}^{n \times k}$ werden zwei unabhängige Sätze von Steuerparametern eingeführt:
+
+\begin{enumerate}
+    \item \textbf{Vorwärts-Gatter} $\mathbf{G}_{fwd}$: Steuert die Sichtbarkeit jeder Speicherzelle während der Datenverarbeitung.
+    \item \textbf{Rückwärts-Gatter} $\mathbf{G}_{bwd}$: Steuert den Gradientenfluss zu jeder Speicherzelle während der Optimierung.
+\end{enumerate}
+
+\subsubsection{Mathematische Formulierung}
+
+\textbf{Inferenzphase (Vorwärtspass):}
+\begin{equation}
+    \mathbf{W}_{eff} = \mathbf{W} \odot \mathbf{G}_{fwd}
+\end{equation}
+wobei $\odot$ die elementweise Multiplikation bezeichnet.
+
+\textbf{Trainingsphase (Gradientenberechnung):}
+\begin{equation}
+    \nabla\mathbf{W} := \nabla\mathbf{W} \odot \mathbf{G}_{bwd}
+\end{equation}
+
+Wenn $\mathbf{G}_{bwd}[i,j] = 0$, dann gilt $\nabla\mathbf{W}[i,j] = 0$, was bedeutet, dass die Gewichtsänderung $\Delta\mathbf{W}[i,j] = -\eta \cdot \nabla\mathbf{W}[i,j] = 0$ ist.
+
+\subsection{Konfigurierbare Positionierung des geschützten Bereichs}
+
+Ein wesentliches Merkmal der Erfindung ist die \textbf{flexible Positionierung} des geschützten Speicherbereichs innerhalb der erweiterten Matrix:
+
+\begin{center}
+\begin{tikzpicture}[scale=0.7]
+    % Grid
+    \draw[step=1, gray!30, thin] (0,0) grid (8,4);
+    
+    % Hauptbereich
+    \draw[very thick] (0,0) rectangle (8,4);
+    
+    % TOP_LEFT
+    \begin{scope}[shift={(0,0)}]
+        \fill[blue!30] (0,2) rectangle (2,4);
+        \draw[thick] (0,2) rectangle (2,4);
+        \node at (1,3) {\footnotesize TOP\_LEFT};
+        \draw[thick] (2,0) -- (2,4);
+        \draw[thick] (0,2) -- (4,2);
+    \end{scope}
+    
+    % TOP_RIGHT
+    \begin{scope}[shift={(4.5,0)}]
+        \fill[blue!30] (2,2) rectangle (3.5,4);
+        \draw[thick] (0,2) rectangle (3.5,4);
+        \node at (2.75,3) {\footnotesize TOP\_RIGHT};
+        \draw[thick] (2,0) -- (2,4);
+        \draw[thick] (0,2) -- (3.5,2);
+    \end{scope}
+    
+    % Labels
+    \node[below] at (2,-0.3) {Position A};
+    \node[below] at (6.25,-0.3) {Position B};
+\end{tikzpicture}\\[0.5cm]
+\textbf{Abb. 1:} Flexible Positionierung des geschützten Bereichs (blau)
+\end{center}
+
+\newpage
+\subsection{Quadranten-Topologie bei Matrixerweiterung}
+
+Bei der Erweiterung einer Matrix entstehen vier funktionale Bereiche:
+
+\begin{center}
+\begin{tikzpicture}[scale=1.0]
+    % Main matrix
+    \draw[very thick] (0,0) rectangle (6,6);
+    
+    % Divider lines
+    \draw[thick, dashed] (3,0) -- (3,6);
+    \draw[thick, dashed] (0,3) -- (6,3);
+    
+    % Quadrants with colors
+    \fill[green!20] (0,3) rectangle (3,6);  % Q_TL
+    \fill[blue!40] (3,3) rectangle (6,6);   % Q_TR - FROZEN
+    \fill[yellow!20] (0,0) rectangle (3,3); % Q_BL
+    \fill[orange!20] (3,0) rectangle (6,3); % Q_BR
+    
+    % Labels
+    \node[align=center] at (1.5,4.5) {\textbf{Q\_TL}\\Synergie\\(Neu$\to$Alt)};
+    \node[align=center] at (4.5,4.5) {\textbf{Q\_TR}\\GESCHÜTZT\\$\mathbf{W}_{alt}$};
+    \node[align=center] at (1.5,1.5) {\textbf{Q\_BL}\\Neu\\(Neu$\to$Neu)};
+    \node[align=center] at (4.5,1.5) {\textbf{Q\_BR}\\Synergie\\(Alt$\to$Neu)};
+    
+    % Dimension labels
+    \node[above] at (1.5,6) {Neue Spalten};
+    \node[above] at (4.5,6) {Alte Spalten};
+    \node[left, rotate=90] at (-0.3,4.5) {Alte Zeilen};
+    \node[left, rotate=90] at (-0.3,1.5) {Neue Zeilen};
+    
+    % Legend
+    \draw[blue!40, fill=blue!40] (7,5) rectangle (7.5,5.5);
+    \node[right] at (7.6,5.25) {Geschützt ($G_{bwd}=0$)};
+    
+    \draw[green!20, fill=green!20] (7,4) rectangle (7.5,4.5);
+    \draw[yellow!20, fill=yellow!20] (7,3.5) rectangle (7.5,4);
+    \draw[orange!20, fill=orange!20] (7,3) rectangle (7.5,3.5);
+    \node[right] at (7.6,3.75) {Trainierbar ($G_{bwd}=1$)};
+\end{tikzpicture}\\[0.5cm]
+\textbf{Abb. 2:} Quadranten-Topologie bei Matrixerweiterung
+\end{center}
+
+\subsection{Gradientenisolation durch Rückwärts-Gatter}
+
+Der zentrale technische Effekt besteht darin, dass geschützte Bereiche mathematisch unveränderbar sind:
+
+\begin{center}
+\begin{tikzpicture}[
+    block/.style={rectangle, draw, minimum height=1cm, minimum width=2cm, align=center},
+    arrow/.style={->, >=Stealth, thick}
+]
+    % Forward path
+    \node[block, fill=green!20] (input) at (0,2) {Eingabe\\$\mathbf{x}$};
+    \node[block, fill=blue!20] (weights) at (3,2) {Gewichte\\$\mathbf{W}$};
+    \node[block, fill=green!20] (output) at (6,2) {Ausgabe\\$\mathbf{y}$};
+    
+    % Forward gates
+    \node[block, fill=yellow!30] (gfwd) at (3,4) {$\mathbf{G}_{fwd}$\\(Sichtbarkeit)};
+    
+    % Backward gates
+    \node[block, fill=red!30] (gbwd) at (3,0) {$\mathbf{G}_{bwd}$\\(Schutz)};
+    
+    % Arrows
+    \draw[arrow] (input) -- (weights);
+    \draw[arrow] (weights) -- (output);
+    \draw[arrow] (gfwd) -- (weights) node[midway, right] {$\odot$};
+    \draw[arrow, red] (gbwd) -- (weights) node[midway, right, red] {$\nabla=0$};
+    
+    % Labels
+    \node[above] at (3,5) {\textbf{Vorwärtsrichtung}};
+    \node[below] at (3,-0.8) {\textbf{Rückwärtsrichtung (Gradient)}};
+\end{tikzpicture}\\[0.5cm]
+\textbf{Abb. 3:} Dual-Gatter-Steuerung für Speicherzugriffe
+\end{center}
+
+\subsection{Anwendungsbeispiel: Multilinguale Sprachmodellerweiterung}
+
+Ein bevorzugtes Anwendungsgebiet ist die Erweiterung monolingualer Sprachmodelle zu polyglotten Systemen.
+
+\begin{enumerate}
+    \item \textbf{Phase 1:} Ein Basismodell (z.B. Englisch) belegt den initialen Speicherbereich $Q_{TR}$.
+    \item \textbf{Phase 2:} Zur Integration einer neuen Sprache (z.B. Deutsch) wird die Matrix erweitert.
+    \item \textbf{Effekt:} Die Grammatik und Logik der ersten Sprache bleiben in $Q_{TR}$ (geschützt) erhalten. Die neue Sprache belegt $Q_{BL}$ (neues Wissen).
+    \item \textbf{Synergie:} Der Quadrant $Q_{TL}$ lernt, deutsche Eingaben auf englische Konzepte abzubilden, wodurch ein impliziter Übersetzungsmechanismus ohne explizites paralleles Training entsteht.
+\end{enumerate}
+
+\newpage
+% ============================================================================
+% ANSPRÜCHE
+% ============================================================================
+\section{Patentansprüche}
+
+\begin{enumerate}
+    \item \textbf{Verfahren} zur verlustfreien Erweiterung von Speicherstrukturen in einem künstlichen neuronalen Netzwerk, \textbf{dadurch gekennzeichnet, dass}:
+    \begin{enumerate}[label=(\alph*)]
+        \item mindestens ein erster Satz von Steuerparametern (Vorwärts-Gatter) bereitgestellt wird, der die Sichtbarkeit von Speicherzellen während der Inferenzphase steuert;
+        \item mindestens ein zweiter, vom ersten unabhängiger Satz von Steuerparametern (Rückwärts-Gatter) bereitgestellt wird, der den Gradientenfluss zu Speicherzellen während der Trainingsphase steuert;
+        \item wobei die Entkopplung dieser beiden Steuermechanismen ermöglicht, dass gespeicherte Werte verwendet werden können (Vorwärts-Gatter aktiviert), ohne dass sie durch nachfolgende Trainingsprozesse modifiziert werden (Rückwärts-Gatter deaktiviert).
+    \end{enumerate}
+    
+    \item Verfahren nach Anspruch 1, \textbf{dadurch gekennzeichnet, dass} die Steuerung durch eine zweidimensionale Maske $\mathbf{G}_{bwd} \in \{0, 1\}^{n \times k}$ erfolgt, wobei ein Wert von 0 die vollständige Blockierung des Gradienten für die entsprechende Speicherzelle bewirkt.
+    
+    \item Verfahren nach Anspruch 1 oder 2, \textbf{dadurch gekennzeichnet, dass} die Position des geschützten Speicherbereichs innerhalb der erweiterten Matrix konfigurierbar ist und mindestens eine der Positionen OBEN-LINKS, OBEN-RECHTS, UNTEN-LINKS, UNTEN-RECHTS oder eine benutzerdefinierte Maske umfasst.
+    
+    \item Verfahren nach einem der Ansprüche 1 bis 3, \textbf{dadurch gekennzeichnet, dass} die Vorwärts-Gatter einer zeitgesteuerten Aktivierungsrampe folgen, um eine graduelle Integration neuer Speicherkapazität ohne Aktivierungsschock zu ermöglichen.
+    
+    \item \textbf{Vorrichtung} zur Durchführung des Verfahrens nach einem der Ansprüche 1 bis 4, umfassend:
+    \begin{enumerate}[label=(\alph*)]
+        \item einen Prozessor zur Ausführung von Berechnungen;
+        \item einen Speicher zur Speicherung von Gewichtsmatrizen;
+        \item mindestens einen ersten Speicherbereich für Vorwärts-Gatter-Parameter;
+        \item mindestens einen zweiten, vom ersten getrennten Speicherbereich für Rückwärts-Gatter-Parameter;
+        \item eine Steuerlogik, die die unabhängige Anwendung der beiden Gatter-Typen auf die Gewichtsmatrix ermöglicht.
+    \end{enumerate}
+    
+    \item Vorrichtung nach Anspruch 5, \textbf{dadurch gekennzeichnet, dass} die Rückwärts-Gatter als binäre Maske implementiert sind, die mittels eines Gradient-Hooks in den Rückpropagationsalgorithmus eingreift.
+    
+    \item \textbf{Computerprogrammprodukt}, umfassend Anweisungen, die bei Ausführung durch einen Prozessor diesen veranlassen, das Verfahren nach einem der Ansprüche 1 bis 4 durchzuführen.
+\end{enumerate}
+
+\newpage
+% ============================================================================
+% ZEICHNUNGSERLÄUTERUNGEN
+% ============================================================================
+\section{Kurze Beschreibung der Zeichnungen}
+
+\begin{description}
+    \item[Abb. 1:] Zeigt die flexible Positionierung des geschützten Speicherbereichs (blau markiert) innerhalb einer erweiterten Matrix. Die Erfindung erlaubt die Platzierung an verschiedenen Positionen (TOP\_LEFT, TOP\_RIGHT, usw.).
+    
+    \item[Abb. 2:] Zeigt die Quadranten-Topologie bei einer Matrixerweiterung. Der blaue Bereich (Q\_TR) enthält die geschützten Originalgewichte. Die anderen Bereiche (grün, gelb, orange) sind trainierbar und ermöglichen Synergieeffekte zwischen altem und neuem Wissen.
+    
+    \item[Abb. 3:] Zeigt das Dual-Gatter-Steuerungsschema. Das Vorwärts-Gatter ($G_{fwd}$) kontrolliert die Sichtbarkeit während der Inferenz, das Rückwärts-Gatter ($G_{bwd}$) blockiert Gradientenfluss zu geschützten Bereichen.
+\end{description}
+
+% ============================================================================
+% SCHLUSS
+% ============================================================================
+\section*{Bezugszeichenliste}
+
+\begin{tabular}{ll}
+$\mathbf{W}$ & Gewichtsmatrix (Speicherstruktur) \\
+$\mathbf{G}_{fwd}$ & Vorwärts-Gatter (Sichtbarkeitssteuerung) \\
+$\mathbf{G}_{bwd}$ & Rückwärts-Gatter (Plastizitätssteuerung) \\
+$\odot$ & Elementweise Multiplikation (Hadamard-Produkt) \\
+$\nabla$ & Gradient (Änderungsvektor während des Trainings) \\
+Q\_TL, Q\_TR, Q\_BL, Q\_BR & Quadranten der erweiterten Matrix \\
+\end{tabular}
+
+\end{document}
