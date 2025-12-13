@@ -125,8 +125,8 @@ class DGESimpleTransformer(nn.Module):
                 if module.gate_col is not None and hasattr(module.gate_col, 'last_mean_open'):
                     sparsity_penalty += module.gate_col.last_mean_open
         
-        # Lambda for sparsity: 1.0 (Increased from 0.05 to Fix Lazy Router)
-        total_loss = loss + (1.0 * sparsity_penalty) if loss is not None else (1.0 * sparsity_penalty)
+        # Lambda for sparsity: 0.15 (Tuned for V 0.2.2: Goldilocks zone)
+        total_loss = loss + (0.15 * sparsity_penalty) if loss is not None else (0.15 * sparsity_penalty)
         
         return logits, total_loss
 
