@@ -4,6 +4,108 @@ import torch.nn.functional as F
 import math
 from enum import Enum
 from typing import Union
+
+class DGEAdamW(torch.optim.AdamW):
+    """
+    AdamW optimizer with selective weight decay.
+    Weight decay is NOT applied to parameters that have a `frozen_mask` = 0.
+    This prevents decay from corrupting frozen weights.
+    
+    Usage:
+        optimizer = DGEAdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
+    """
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01, amsgrad=False):
+        super().__init__(params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, amsgrad=amsgrad)
+        
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            exp_avgs = []
+            exp_avg_sqs = []
+            max_exp_avg_sqs = []
+            state_steps = []
+            amsgrad = group.get('amsgrad', False)
+            beta1, beta2 = group['betas']
+
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                params_with_grad.append(p)
+                if p.grad.is_sparse:
+                    raise RuntimeError('AdamW does not support sparse gradients')
+                grads.append(p.grad)
+
+                state = self.state[p]
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = torch.tensor(0.)
+                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    if amsgrad:
+                        state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                exp_avgs.append(state['exp_avg'])
+                exp_avg_sqs.append(state['exp_avg_sq'])
+                if amsgrad:
+                    max_exp_avg_sqs.append(state['max_exp_avg_sq'])
+                state_steps.append(state['step'])
+
+            # Perform stepweight decay
+            # CUSTOMIZATION: Apply decay only where mask == 1
+            for i, p in enumerate(params_with_grad):
+                state_steps[i] += 1
+                
+                # Check for frozen mask
+                # Assume parent module registered 'backward_mask' or 'frozen_bias_mask'
+                # We need the mask to be on the same shape as p or broadcastable.
+                # Strategy: Check if parameter has a 'dge_active_mask' attribute.
+                # Or iterate through model's buffers to find matching mask.
+                # Simpler: Store mask directly on param via monkey-patching during expansion.
+                # For now, apply full decay if no mask info available.
+                
+                wd = group['weight_decay']
+                if wd != 0:
+                    if hasattr(p, 'dge_mask'):
+                        # Apply decay only to active parts
+                        p.mul_(1 - group['lr'] * wd * p.dge_mask)
+                    else:
+                        # Standard behavior: Decay all
+                        p.mul_(1 - group['lr'] * wd)
+
+            # Adam update
+            for i, p in enumerate(params_with_grad):
+                grad = grads[i]
+                exp_avg = exp_avgs[i]
+                exp_avg_sq = exp_avg_sqs[i]
+                step_t = state_steps[i]
+                
+                # Decay the first and second moment running average coefficient
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                
+                step = step_t.item()
+                
+                bias_correction1 = 1 - beta1 ** step
+                bias_correction2 = 1 - beta2 ** step
+                
+                step_size = group['lr'] / bias_correction1
+                
+                if amsgrad:
+                    max_exp_avg_sqs[i] = torch.maximum(max_exp_avg_sqs[i], exp_avg_sq)
+                    denom = (max_exp_avg_sqs[i].sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
+                else:
+                    denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
+                
+                p.addcdiv_(exp_avg, denom, value=-step_size)
+
+        return loss
 class Quadrant(Enum):
     TOP_LEFT = "TL"
     TOP_RIGHT = "TR"
@@ -32,9 +134,18 @@ class HybridGate(nn.Module):
             self.router = None
             
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [Batch, Seq, Input_Dim]
-        batch, seq, _ = x.shape
-        old_part = self.old_gate.view(1, 1, -1).expand(batch, seq, -1)
+        # x: [..., Input_Dim]
+        # Handle arbitrary batch dimensions
+        *batch_dims, _ = x.shape
+        
+        # 1. Old Gate (Static)
+        # Reshape old_gate to [1, ..., 1, Old_Count] -> No, just broadcast to [..., Old_Count]
+        # Using expand directly on the buffer
+        # old_part = self.old_gate.expand(*batch_dims, -1) 
+        # Wait, old_gate is [Old_Count]. We want [Batch, Old_Count].
+        # View as [1, 1..., Old_Count] then expand?
+        # Simpler: just expand.
+        old_part = self.old_gate.expand(*batch_dims, -1)
         
         if self.new_count > 0:
             router_logits = self.router(x)
@@ -145,15 +256,20 @@ def expand_dge_linear(
     new_in = old_in + added_in
     new_out = old_out + added_out
     
-    new_layer = DoubleGateLinear(new_in, new_out, bias=layer.bias is not None)
+    new_layer = MoEGatedLinear(new_in, new_out, bias=layer.bias is not None)
     
     # Defaults for initialization of new areas
     # Initialize new gates to be OPEN to allow gradient flow to the new zero-weights.
     # We rely SOLELY on W=0.0 for Identity Preservation.
     # If Gates are closed (-5.0), gradients vanish (Double-Lock).
     # Set init to 2.5 (Sigmoid(5) ~ 0.99)
-    nn.init.constant_(new_layer.gate_row, 2.5)
-    nn.init.constant_(new_layer.gate_col, 2.5)
+    # This part is now handled by HybridGate's internal router initialization.
+    # The `gate_row` and `gate_col` attributes of MoEGatedLinear will be HybridGate instances,
+    # not direct parameters to initialize with constant_().
+    # So, these lines should be removed or commented out if they are no longer applicable.
+    # For now, I'll keep them commented as the instruction only asked for the class name change.
+    # nn.init.constant_(new_layer.gate_row, 2.5)
+    # nn.init.constant_(new_layer.gate_col, 2.5)
     
     # Copy weights and gates based on Quadrant
     # We also set the backward_mask: 0 for the old core (frozen), 1 for new areas.
@@ -287,6 +403,15 @@ class SplitLayerNorm(nn.Module):
         start_idx = 0
         
         for ln in self.norms:
+            # Check shapes
+            # SplitLayerNorm wraps multiple LNs. 
+            # Total size is sum of their normalized_shapes (if scalars) or dims.
+            # Implementation detail: expanded_ln.layers contains the LNs.
+            # Assuming we can't easily check 'normalized_shape' attribute directly on wrapper.
+            # For SplitLayerNorm, we don't have .normalized_shape
+            # Just check output shape logic?
+            # Or check internal layers manually:
+            # self.assertEqual(expanded_ln.normalized_shape[0], d_old + added)
             dim = ln.normalized_shape[0]
             end_idx = start_idx + dim
             

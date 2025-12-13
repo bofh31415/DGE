@@ -1,72 +1,19 @@
-.E.EEE..E.E.
+.E..........
 ======================================================================
 ERROR: test_expand_layer_norm (tests.test_dge.TestDGELinear.test_expand_layer_norm)
 Verifies that expand_layer_norm correctly resizes and preserves parameters.
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 256, in test_expand_layer_norm
-    self.assertEqual(expanded_ln.normalized_shape[0], d_old + added)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 281, in test_expand_layer_norm
+    self.assertTrue(torch.all(expanded_ln.weight.grad[:d_old] == 0.0), "Old LN weights leaked gradients!")
+                              ^^^^^^^^^^^^^^^^^^
   File "C:\Users\Sven\AppData\Roaming\Python\Python313\site-packages\torch\nn\modules\module.py", line 1940, in __getattr__
     raise AttributeError(
         f"'{type(self).__name__}' object has no attribute '{name}'"
     )
-AttributeError: 'SplitLayerNorm' object has no attribute 'normalized_shape'
-
-======================================================================
-ERROR: test_expansion_top_left (tests.test_dge.TestDGELinear.test_expansion_top_left)
-----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 107, in test_expansion_top_left
-    expanded = expand_dge_linear(layer, added_in=2, added_out=2)
-  File "C:\Users\Sven\Documents\DGE\Implementation\dge_utils.py", line 148, in expand_dge_linear
-    new_layer = DoubleGateLinear(new_in, new_out, bias=layer.bias is not None)
-                ^^^^^^^^^^^^^^^^
-NameError: name 'DoubleGateLinear' is not defined. Did you mean: 'MoEGatedLinear'?
-
-======================================================================
-ERROR: test_expansion_zero_init (tests.test_dge.TestDGELinear.test_expansion_zero_init)
-CRITICAL TEST: Verifies that new physical weights are initialized to 0.0.
-----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 137, in test_expansion_zero_init
-    expanded = expand_dge_linear(layer, added_in=2, added_out=2)
-  File "C:\Users\Sven\Documents\DGE\Implementation\dge_utils.py", line 148, in expand_dge_linear
-    new_layer = DoubleGateLinear(new_in, new_out, bias=layer.bias is not None)
-                ^^^^^^^^^^^^^^^^
-NameError: name 'DoubleGateLinear' is not defined. Did you mean: 'MoEGatedLinear'?
-
-======================================================================
-ERROR: test_forward_pass_base (tests.test_dge.TestDGELinear.test_forward_pass_base)
-----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 60, in test_forward_pass_base
-    y_manual = F.linear(x, layer.weight, layer.bias)
-               ^
-NameError: name 'F' is not defined
-
-======================================================================
-ERROR: test_gate_freezing (tests.test_dge.TestDGELinear.test_gate_freezing)
-Verifies that Old Gates (Static) are frozen.
-----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 202, in test_gate_freezing
-    expanded = expand_dge_linear(layer, 2, 2)
-  File "C:\Users\Sven\Documents\DGE\Implementation\dge_utils.py", line 148, in expand_dge_linear
-    new_layer = DoubleGateLinear(new_in, new_out, bias=layer.bias is not None)
-                ^^^^^^^^^^^^^^^^
-NameError: name 'DoubleGateLinear' is not defined. Did you mean: 'MoEGatedLinear'?
-
-======================================================================
-ERROR: test_hybrid_gate_behavior (tests.test_dge.TestDGELinear.test_hybrid_gate_behavior)
-----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 37, in test_hybrid_gate_behavior
-    self.assertEqual(gate.router.bias.item(), -5.0) # Closed init
-                     ~~~~~~~~~~~~~~~~~~~~~^^
-RuntimeError: a Tensor with 2 elements cannot be converted to Scalar
+AttributeError: 'SplitLayerNorm' object has no attribute 'weight'
 
 ----------------------------------------------------------------------
-Ran 12 tests in 2.908s
+Ran 12 tests in 3.573s
 
-FAILED (errors=6)
+FAILED (errors=1)
