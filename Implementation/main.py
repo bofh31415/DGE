@@ -3,8 +3,7 @@ import torch.optim as optim
 import sys
 import os
 from dge_model import DGESimpleTransformer
-from dge_utils import Quadrant
-from dge_linear import DoubleGateLinear
+from dge_utils import Quadrant, MoEGatedLinear
 from dge_training import train_task, evaluate_task, TaskType
 from version import __version__
 from dge_logger import DGELogger
@@ -45,7 +44,7 @@ class DGELab:
         active_params = 0
         
         for module in self.model.modules():
-            if isinstance(module, DoubleGateLinear):
+            if isinstance(module, MoEGatedLinear):
                 mask = module.backward_mask
                 frozen_params += (mask == 0).sum().item()
                 active_params += (mask == 1).sum().item()
@@ -511,7 +510,8 @@ class DGELab:
         steps_a = 500
         new_step = train_task(
             self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=steps_a, 
-            logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn
+            logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn,
+            optimizer=self.optimizer # Use the DGEAdamW instance with groups
         )
         self.global_step = new_step
         self.trained_skills.add(TaskType.COUNT_UP.name)
@@ -537,7 +537,19 @@ class DGELab:
             self.logger.log_event("EXPANDED", model_state, step=self.global_step)
             
         # Re-init optimizer
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
+        # Re-init optimizer (Parameters changed) - MUST PRESERVE DIFFERENTIAL LRs
+        router_params = []
+        default_params = []
+        for name, param in self.model.named_parameters():
+            if 'router' in name:
+                router_params.append(param)
+            else:
+                default_params.append(param)
+                
+        self.optimizer = DGEAdamW([
+            {'params': default_params, 'lr': 1e-3},
+            {'params': router_params, 'lr': 1e-4} 
+        ], weight_decay=0.0)
         
         # --- Step 5: Identity Check ---
         print("\n[Phase 5] Identity Verification (Checking Skill A post-expansion)...")
@@ -555,7 +567,9 @@ class DGELab:
         steps_b = 500
         new_step = train_task(
             self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=steps_b, 
-            logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn
+            logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn,
+            optimizer=self.optimizer, # Use Differential LRs
+            probe_task_type=TaskType.COUNT_UP # Forensic Logging: Spy on Skill A
         )
         self.global_step = new_step
         self.trained_skills.add(TaskType.COUNT_DOWN.name)

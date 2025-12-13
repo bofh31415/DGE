@@ -52,10 +52,13 @@ def generate_batch(task_type, vocab_size, batch_size, seq_len):
     return x, y
 
 def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_len=32, 
-               logger=None, start_step=0, checkpoint_fn=None):
+               logger=None, start_step=0, checkpoint_fn=None, optimizer=None, probe_task_type=None):
     print(f"\n--- Starting Training: {task_type.name} ({steps} steps) ---")
     
-    optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+    if optimizer is None:
+        optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+        print("⚠️ Warning: Using default AdamW instead of passed optimizer.")
+        
     model.train()
     start_time = time.time()
     
@@ -76,8 +79,37 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
         optimizer.step()
         
         # --- Forensic Logging ---
+        # --- Forensic Logging ---
         if logger:
-            metrics = model.validate_dge_integrity()
+            # 1. Capture Training Metrics (from the backward pass just finished)
+            train_metrics = model.validate_dge_integrity()
+            
+            # 2. Cross-Task Probing (Forensic Analysis)
+            probe_loss = 0.0
+            probe_ppl = 0.0
+            if probe_task_type:
+                # Capture state *specifically* for probe inputs
+                model.eval()
+                with torch.no_grad():
+                    xp, yp = generate_batch(probe_task_type, vocab_size, batch_size, seq_len)
+                    # Forward pass updates gate statistics (last_mean_open)
+                    _, ploss = model(xp, yp)
+                    probe_loss = ploss.item()
+                    probe_ppl = math.exp(probe_loss) if probe_loss < 100 else float('inf')
+                    
+                    # Capture metrics NOW (post-probe forward) to get Probe Gate Activity
+                    probe_metrics_raw = model.validate_dge_integrity()
+                    
+                    # Namespace them
+                    for k, v in probe_metrics_raw.items():
+                        if "Gate" in k or "Router" in k: # Only care about routing behavior for probe
+                            train_metrics[f"Probe_{k}"] = v
+                            
+                model.train()
+                # Re-run forward on training data? No, just proceed. 
+                # Note: last_mean_open is now from probe. Next training step will overwrite it.
+                # Ideally, we should maybe restore it, but for simple logging it's fine 
+                # as long as we know 'train_metrics' captured it BEFORE probe.
             
             # Metrics
             loss_val = loss.item()
@@ -86,8 +118,13 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
             mem_mb = 0.0
             if process:
                 mem_mb = process.memory_info().rss / 1024 / 1024
+            
+            # Add probe scalar metrics
+            if probe_task_type:
+                train_metrics["Probe_Loss"] = probe_loss
+                train_metrics["Probe_PPL"] = probe_ppl
                 
-            logger.log_training_step(current_step, task_type.name, loss_val, ppl, mem_mb, metrics) # Pass step and task name
+            logger.log_training_step(current_step, task_type.name, loss_val, ppl, mem_mb, train_metrics)
         # ------------------------
         
         if i % 50 == 0 or i == steps - 1:

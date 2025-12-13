@@ -159,16 +159,6 @@ class DGESimpleTransformer(nn.Module):
         """
         Calculates detailed forensic metrics for DGE validity.
         """
-        metrics = {
-            'frozen_grad_norm': 0.0, # Aggregate
-            'active_grad_norm': 0.0,
-            'frozen_weight_grad': 0.0,
-            'frozen_bias_grad': 0.0,
-            'frozen_head_grad': 0.0,
-            'gate_grad_norm': 0.0,
-            'max_gate_mag': 0.0
-        }
-        
         frozen_sq_sum = 0.0
         active_sq_sum = 0.0
         
@@ -176,7 +166,13 @@ class DGESimpleTransformer(nn.Module):
         frozen_bias_sq = 0.0
         frozen_head_sq = 0.0
         gate_grad_sq = 0.0
-        max_gate_val = 0.0
+        
+        # Aggregators for detailed logs
+        max_gate_val = 0.0 # Standard ABS max
+        
+        # New Forensic Stats
+        gate_bias_vals = []
+        router_weight_norms = []
         
         for name, module in self.named_modules():
             # --- MoEGatedLinear Checks ---
@@ -184,12 +180,22 @@ class DGESimpleTransformer(nn.Module):
                 # Max Gate Magnitude (Forward check) - Now via HybridGate
                 with torch.no_grad():
                     # In MoE, gates are HybridGate modules. Check router bias.
-                    if module.gate_row is not None and hasattr(module.gate_row, 'router'):
-                        if module.gate_row.router is not None:
-                            max_gate_val = max(max_gate_val, module.gate_row.router.bias.abs().max().item())
-                    if module.gate_col is not None and hasattr(module.gate_col, 'router'):
-                        if module.gate_col.router is not None:
-                            max_gate_val = max(max_gate_val, module.gate_col.router.bias.abs().max().item())
+                    # Helper to collect bias
+                    def collect_router_stats(gate_module):
+                        if gate_module is not None and hasattr(gate_module, 'router') and gate_module.router is not None:
+                            bias = gate_module.router.bias
+                            # Max Mag
+                            nonlocal max_gate_val
+                            max_gate_val = max(max_gate_val, bias.abs().max().item())
+                            
+                            # Signed Stats
+                            gate_bias_vals.extend(bias.flatten().tolist())
+                            
+                            # Weight Norm
+                            router_weight_norms.append(gate_module.router.weight.norm().item())
+
+                    collect_router_stats(module.gate_row)
+                    collect_router_stats(module.gate_col)
 
                 if module.weight.grad is None:
                     continue
