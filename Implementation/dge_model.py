@@ -125,8 +125,8 @@ class DGESimpleTransformer(nn.Module):
                 if module.gate_col is not None and hasattr(module.gate_col, 'last_mean_open'):
                     sparsity_penalty += module.gate_col.last_mean_open
         
-        # Lambda for sparsity: 0.05 (Encourage strict closing)
-        total_loss = loss + (0.05 * sparsity_penalty) if loss is not None else (0.05 * sparsity_penalty)
+        # Lambda for sparsity: 1.0 (Increased from 0.05 to Fix Lazy Router)
+        total_loss = loss + (1.0 * sparsity_penalty) if loss is not None else (1.0 * sparsity_penalty)
         
         return logits, total_loss
 
@@ -179,13 +179,17 @@ class DGESimpleTransformer(nn.Module):
         max_gate_val = 0.0
         
         for name, module in self.named_modules():
-            # --- DoubleGateLinear Checks ---
-            if isinstance(module, DoubleGateLinear):
-                # Max Gate Magnitude (Forward check)
+            # --- MoEGatedLinear Checks ---
+            if isinstance(module, MoEGatedLinear):
+                # Max Gate Magnitude (Forward check) - Now via HybridGate
                 with torch.no_grad():
-                    g_row_max = module.gate_row.abs().max().item()
-                    g_col_max = module.gate_col.abs().max().item()
-                    max_gate_val = max(max_gate_val, g_row_max, g_col_max)
+                    # In MoE, gates are HybridGate modules. Check router bias.
+                    if module.gate_row is not None and hasattr(module.gate_row, 'router'):
+                        if module.gate_row.router is not None:
+                            max_gate_val = max(max_gate_val, module.gate_row.router.bias.abs().max().item())
+                    if module.gate_col is not None and hasattr(module.gate_col, 'router'):
+                        if module.gate_col.router is not None:
+                            max_gate_val = max(max_gate_val, module.gate_col.router.bias.abs().max().item())
 
                 if module.weight.grad is None:
                     continue
@@ -205,24 +209,15 @@ class DGESimpleTransformer(nn.Module):
                 active_grads = module.weight.grad * module.backward_mask
                 active_sq_sum += active_grads.norm().item() ** 2
 
-                # 2. Gates
-                if module.gate_row.grad is not None:
-                    # Check Frozen Gates (Old knowledge)
-                    frozen_gate_row = module.gate_row.grad * (1 - module.gate_row_mask)
-                    norm = frozen_gate_row.norm().item()
-                    frozen_weight_sq += norm ** 2 # Counting gate freeze as weight freeze type failure
-                    frozen_sq_sum += norm ** 2
-                    
-                    # Track Active/Total Gate Grads for health
-                    gate_grad_sq += module.gate_row.grad.norm().item() ** 2
-
-                if module.gate_col.grad is not None:
-                    frozen_gate_col = module.gate_col.grad * (1 - module.gate_col_mask)
-                    norm = frozen_gate_col.norm().item()
-                    frozen_weight_sq += norm ** 2
-                    frozen_sq_sum += norm ** 2
-                    
-                    gate_grad_sq += module.gate_col.grad.norm().item() ** 2
+                # 2. Gates (HybridGate)
+                # Router weights are trainable; old_gate is buffer (no grad).
+                if module.gate_row is not None and hasattr(module.gate_row, 'router'):
+                    if module.gate_row.router is not None and module.gate_row.router.weight.grad is not None:
+                        gate_grad_sq += module.gate_row.router.weight.grad.norm().item() ** 2
+                        
+                if module.gate_col is not None and hasattr(module.gate_col, 'router'):
+                    if module.gate_col.router is not None and module.gate_col.router.weight.grad is not None:
+                        gate_grad_sq += module.gate_col.router.weight.grad.norm().item() ** 2
                     
                 # 3. Bias (Critical V 0.1.5 Check)
                 if module.bias is not None and module.bias.grad is not None:
