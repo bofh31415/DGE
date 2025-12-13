@@ -332,14 +332,28 @@ class DGESimpleTransformer(nn.Module):
                         active_h = module.weight.grad * module.frozen_mask
                         active_sq_sum += active_h.norm().item() ** 2
 
-        metrics['frozen_grad_norm'] = frozen_sq_sum ** 0.5
-        metrics['active_grad_norm'] = active_sq_sum ** 0.5
+        frozen_grad_norm = frozen_sq_sum ** 0.5
+        active_grad_norm = active_sq_sum ** 0.5
+        gate_grad_norm = gate_grad_sq ** 0.5
         
-        metrics['frozen_weight_grad'] = frozen_weight_sq ** 0.5
-        metrics['frozen_bias_grad'] = frozen_bias_sq ** 0.5
-        metrics['frozen_head_grad'] = frozen_head_sq ** 0.5
+        # Process Forensic Aggregates
+        bias_max = max(gate_bias_vals) if gate_bias_vals else 0.0
+        bias_min = min(gate_bias_vals) if gate_bias_vals else 0.0
+        bias_mean = sum(gate_bias_vals) / len(gate_bias_vals) if gate_bias_vals else 0.0
+        weight_norm_avg = sum(router_weight_norms) / len(router_weight_norms) if router_weight_norms else 0.0
         
-        metrics['gate_grad_norm'] = gate_grad_sq ** 0.5
-        metrics['max_gate_mag'] = max_gate_val
-        
-        return metrics
+        return {
+            "Frozen_Grad_Norm": frozen_grad_norm,
+            "Gate_Grad_Norm": gate_grad_norm,
+            "Max_Gate_Mag": max_gate_val,
+            
+            # Forensic Details
+            "Gate_Bias_Max": bias_max,
+            "Gate_Bias_Min": bias_min, 
+            "Gate_Bias_Mean": bias_mean,
+            "Router_Weight_Norm": weight_norm_avg,
+            
+            # Legacy/Debug info (optional, keeping for completeness if needed by Logger)
+            "frozen_weight_grad": frozen_weight_sq ** 0.5,
+            "frozen_bias_grad": frozen_bias_sq ** 0.5
+        }

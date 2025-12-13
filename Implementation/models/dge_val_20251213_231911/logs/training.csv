@@ -1,0 +1,1 @@
+Step,Task,Loss,Perplexity,Memory_MB,Memory_MB,Frozen_Grad_Norm,Frozen_Weight_Grad,Frozen_Bias_Grad,Frozen_Head_Grad,Gate_Grad_Norm,Max_Gate_Mag,Active_Grad_Norm
