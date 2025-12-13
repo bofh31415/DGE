@@ -1,0 +1,11 @@
+Timestamp,Step,Event,Details
+2025-12-13T23:01:46.793180,0,CREATED,"{""code_version"": ""V 0.2.2""}"
+2025-12-13T23:01:46.794075,0,CREATED,"{""d_model"": 64, ""n_layer"": 2, ""n_head"": 4, ""vocab_size"": 500, ""total_params"": 172160, ""frozen_params"": 0, ""active_params"": 0}"
+2025-12-13T23:01:46.817349,0,SAVED,"{""path"": ""C:\\Users\\Sven\\Documents\\DGE\\Implementation\\models\\dge_val_20251213_230144"", ""snapshot"": true}"
+2025-12-13T23:02:03.490588,499,TRAINED,"{""task"": ""COUNT_UP"", ""steps_trained"": 500, ""start_step"": 0, ""end_step"": 499, ""final_loss"": 0.0006925612105987966, ""final_ppl"": 1.000692801086487, ""duration_sec"": 16.67143702507019}"
+2025-12-13T23:02:03.510416,0,SAVED,"{""path"": ""C:\\Users\\Sven\\Documents\\DGE\\Implementation\\models\\dge_val_20251213_230144"", ""snapshot"": true}"
+2025-12-13T23:02:03.581444,500,EXPANDED,"{""d_model"": 128, ""n_layer"": 2, ""n_head"": 8, ""vocab_size"": 500, ""total_params"": 1059136, ""frozen_params"": 0, ""active_params"": 0, ""added_width"": 64, ""quadrant"": ""TOP_LEFT""}"
+2025-12-13T23:03:23.004635,999,TRAINED,"{""task"": ""COUNT_DOWN"", ""steps_trained"": 500, ""start_step"": 500, ""end_step"": 999, ""final_loss"": 0.4993523955345154, ""final_ppl"": 1.6476538970981427, ""duration_sec"": 79.27244520187378}"
+2025-12-13T23:03:23.046652,500,SAVED,"{""path"": ""C:\\Users\\Sven\\Documents\\DGE\\Implementation\\models\\dge_val_20251213_230144"", ""snapshot"": true}"
+2025-12-13T23:03:23.326259,1000,BENCHMARK_CHAIN_FINAL,"{""COUNT_UP"": 0.0625, ""COUNT_DOWN"": 99.78125, ""ID_PRESERVATION_DELTA"": 0.0}"
+2025-12-13T23:03:23.373421,1000,SAVED,"{""path"": ""C:\\Users\\Sven\\Documents\\DGE\\Implementation\\models\\dge_val_20251213_230144"", ""snapshot"": true}"

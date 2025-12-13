@@ -11,6 +11,7 @@ from dge_logger import DGELogger
 import time
 import json
 import shutil
+from dge_utils import DGEAdamW
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -473,7 +474,23 @@ class DGELab:
         vocab_size = 500  # Smaller vocab for faster convergence on simple tasks
         
         self.model = DGESimpleTransformer(vocab_size=vocab_size, d_model=d_model, n_layer=n_layer, n_head=n_head)
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
+        self.model = DGESimpleTransformer(vocab_size=vocab_size, d_model=d_model, n_layer=n_layer, n_head=n_head)
+        
+        # --- Differential Learning Rates (V 0.2.3) ---
+        # Router needs to open SLOWLY to prevent lazy drift.
+        router_params = []
+        default_params = []
+        
+        for name, param in self.model.named_parameters():
+            if 'router' in name:
+                router_params.append(param)
+            else:
+                default_params.append(param)
+                
+        self.optimizer = DGEAdamW([
+            {'params': default_params, 'lr': 1e-3},
+            {'params': router_params, 'lr': 1e-4} # 0.1x Learning Rate for Stability
+        ], weight_decay=0.0) # Weight decay handled internally by DGEAdamW if needed/configured
         self.trained_skills = set()
         self.global_step = 0
         os.makedirs(self.models_dir, exist_ok=True)
