@@ -187,7 +187,14 @@ class DGELab:
             elif q_choice == '3': quadrant = Quadrant.BOTTOM_LEFT
             elif q_choice == '4': quadrant = Quadrant.BOTTOM_RIGHT
             
-            self.model.expand_model(added, quadrant=quadrant)
+            # H4 Update: Calculate absolute new dimension and enforce protections
+            new_d_model = self.model.d_model + added
+            self.model.expand_model(new_input_dim=new_d_model, 
+                                  new_output_dim=self.model.token_emb.num_embeddings,
+                                  router_type='mlp',
+                                  isolate_cross_terms=True, 
+                                  use_gradient_rescue=True, 
+                                  use_orthogonal_init=True)
             
             # Log expansion with updated model state
             if self.logger:
@@ -198,7 +205,18 @@ class DGELab:
             
             # Re-init optimizer for new parameters
             # CRITICAL FIX: weight_decay=0.0 is required to prevent "decaying" frozen weights.
-            self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
+            router_params = []
+            default_params = []
+            for name, param in self.model.named_parameters():
+                if 'router' in name or 'gate' in name:
+                    router_params.append(param)
+                else:
+                    default_params.append(param)
+                    
+            self.optimizer = DGEAdamW([
+                {'params': default_params, 'lr': 1e-3},
+                {'params': router_params, 'lr': 1e-4} 
+            ], weight_decay=0.0)
             print("✅ Model expanded successfully.")
             
         except ValueError:
@@ -483,7 +501,12 @@ class DGELab:
                 # Expand
                 print("Expanding model...")
                 current_d_model = self.model.d_model
-                self.model.expand_model(new_input_dim=current_d_model + 64, new_output_dim=self.model.token_emb.num_embeddings, router_type='linear')
+                self.model.expand_model(new_input_dim=current_d_model + 64, 
+                                  new_output_dim=self.model.token_emb.num_embeddings, 
+                                  router_type='mlp',
+                                  isolate_cross_terms=True,
+                                  use_gradient_rescue=True,
+                                  use_orthogonal_init=True)
                 
                 # Split parameters for Differential LR
                 router_params = []
@@ -788,7 +811,7 @@ class DGELab:
         default_params = []
         
         for name, param in self.model.named_parameters():
-            if 'router' in name:
+            if 'router' in name or 'gate' in name:
                 router_params.append(param)
             else:
                 default_params.append(param)
@@ -834,7 +857,12 @@ class DGELab:
         # --- Step 4: Expansion ---
         print("\n[Phase 4] Expanding Model (+64 width)...")
         current_d_model = self.model.d_model
-        self.model.expand_model(new_input_dim=current_d_model + 32, new_output_dim=self.model.token_emb.num_embeddings, router_type='linear')
+        self.model.expand_model(new_input_dim=current_d_model + 32, 
+                              new_output_dim=self.model.token_emb.num_embeddings, 
+                              router_type='mlp',
+                              isolate_cross_terms=True,
+                              use_gradient_rescue=True,
+                              use_orthogonal_init=True)
         
         # Log Expansion
         if self.logger:
@@ -848,7 +876,7 @@ class DGELab:
         router_params = []
         default_params = []
         for name, param in self.model.named_parameters():
-            if 'router' in name:
+            if 'router' in name or 'gate' in name:
                 router_params.append(param)
             else:
                 default_params.append(param)
@@ -876,7 +904,8 @@ class DGELab:
             self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=steps_b, 
             logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn,
             optimizer=self.optimizer, # Use Differential LRs
-            probe_task_type=TaskType.COUNT_UP # Forensic Logging: Spy on Skill A
+            probe_task_type=TaskType.COUNT_UP, # Forensic Logging: Spy on Skill A
+            sparsity_lambda=0.05
         )
         self.global_step = new_step
         self.trained_skills.add(TaskType.COUNT_DOWN.name)
