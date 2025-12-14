@@ -1,4 +1,0 @@
-Timestamp,Step,Event,Details
-2025-12-14T00:32:51.635883,0,CREATED,"{""code_version"": ""V 0.2.7""}"
-2025-12-14T00:32:51.638700,0,CREATED,"{""d_model"": 64, ""n_layer"": 2, ""n_head"": 4, ""vocab_size"": 500, ""total_params"": 172160, ""frozen_params"": 0, ""active_params"": 130304}"
-2025-12-14T00:33:08.880901,499,TRAINED,"{""task"": ""COUNT_UP"", ""steps_trained"": 500, ""start_step"": 0, ""end_step"": 499, ""final_loss"": 0.0007416207226924598, ""final_ppl"": 1.0007418957913352, ""duration_sec"": 17.24069881439209}"

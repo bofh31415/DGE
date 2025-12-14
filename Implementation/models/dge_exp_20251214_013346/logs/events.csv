@@ -1,6 +1,0 @@
-Timestamp,Step,Event,Details
-2025-12-14T01:33:46.987583,0,CREATED,"{""code_version"": ""V 0.2.7""}"
-2025-12-14T01:33:46.990469,0,CREATED,"{""d_model"": 64, ""n_layer"": 2, ""n_head"": 4, ""vocab_size"": 500, ""total_params"": 172160, ""frozen_params"": 0, ""active_params"": 130304}"
-2025-12-14T01:34:13.643884,499,TRAINED,"{""task"": ""COUNT_UP"", ""steps_trained"": 500, ""start_step"": 0, ""end_step"": 499, ""final_loss"": 0.0007110654842108488, ""final_ppl"": 1.0007113183512037, ""duration_sec"": 26.651450157165527}"
-2025-12-14T01:36:25.069477,999,TRAINED,"{""task"": ""COUNT_DOWN"", ""steps_trained"": 500, ""start_step"": 500, ""end_step"": 999, ""final_loss"": 0.12433560937643051, ""final_ppl"": 1.1323958498984248, ""duration_sec"": 131.38826751708984}"
-2025-12-14T01:36:25.116327,500,SAVED,"{""path"": ""C:\\Users\\Sven\\Documents\\DGE\\Implementation\\models\\dge_exp_20251214_013346"", ""snapshot"": ""dge_exp_v3_h3_ortho""}"

@@ -1,9 +1,0 @@
-{
-  "d_model": 64,
-  "n_layer": 2,
-  "n_head": 4,
-  "model_name": "dge_val_20251214_055743",
-  "vocab_size": 500,
-  "trained_skills": [],
-  "global_step": 0
-}

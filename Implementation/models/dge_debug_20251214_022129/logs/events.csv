@@ -1,3 +1,0 @@
-Timestamp,Step,Event,Details
-2025-12-14T02:21:29.083171,0,CREATED,"{""code_version"": ""V 0.2.7""}"
-2025-12-14T02:21:34.645222,9,TRAINED,"{""task"": ""COUNT_DOWN"", ""steps_trained"": 10, ""start_step"": 0, ""end_step"": 9, ""final_loss"": 6.403028964996338, ""final_ppl"": 603.6707690670904, ""duration_sec"": 2.3316545486450195}"

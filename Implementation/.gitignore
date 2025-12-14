@@ -1,0 +1,32 @@
+# DGE Lab .gitignore
+
+# Model outputs (large binary files)
+models/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Logs and debug files
+*.log
+debug_hook.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.venv/
+env/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db

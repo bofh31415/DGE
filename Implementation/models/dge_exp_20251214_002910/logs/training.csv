@@ -1,1 +1,0 @@
-Step,Task,Loss,Perplexity,Memory_MB,Fried_Grad_Norm,Gate_Grad_Norm,Max_Gate_Mag,Active_Grad_Norm,Gate_Bias_Max,Gate_Bias_Min,Gate_Bias_Mean,Router_Weight_Norm,Probe_Loss,Probe_PPL,Probe_Gate_Bias_Max
