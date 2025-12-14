@@ -1,0 +1,71 @@
+...FF.....F...E..E
+======================================================================
+ERROR: test_model_expansion (test_dge_lab.TestDGEModel.test_model_expansion)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge_lab.py", line 33, in test_model_expansion
+    model.expand_model(added_d_model=32, quadrant=Quadrant.TOP_LEFT)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: DGESimpleTransformer.expand_model() got an unexpected keyword argument 'added_d_model'
+
+======================================================================
+ERROR: test_save_load (test_dge_lab.TestPersistence.test_save_load)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\main.py", line 373, in load_model_by_name
+    print("\u2705 Model loaded successfully.")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge_lab.py", line 82, in test_save_load
+    self.lab.load_model_by_name("UnitTestModel")
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sven\Documents\DGE\Implementation\main.py", line 376, in load_model_by_name
+    print(f"\u274c Error loading model: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 0: character maps to <undefined>
+
+======================================================================
+FAIL: test_expansion_top_left (test_dge.TestDGELinear.test_expansion_top_left)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 127, in test_expansion_top_left
+    self.assertTrue(torch.all(expanded.gate_row.router.bias == -5.0))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: tensor(False) is not true
+
+======================================================================
+FAIL: test_expansion_zero_init (test_dge.TestDGELinear.test_expansion_zero_init)
+CRITICAL TEST: Verifies that new physical weights are initialized to 0.0.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 145, in test_expansion_zero_init
+    self.assertTrue(torch.all(expanded.weight[0:2, 2:4] == 0.0))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: tensor(False) is not true
+
+======================================================================
+FAIL: test_hybrid_gate_behavior (test_dge.TestDGELinear.test_hybrid_gate_behavior)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 38, in test_hybrid_gate_behavior
+    self.assertTrue(torch.all(gate.router.bias == -5.0), "Closed init") # Closed init
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: tensor(False) is not true : Closed init
+
+----------------------------------------------------------------------
+Ran 18 tests in 4.462s
+
+FAILED (failures=3, errors=2)
+Snapshot saved: step_000000
+Model saved to C:\Users\Sven\Documents\DGE\Implementation\tests\test_models\UnitTestModel
+Loading model 'UnitTestModel' with config: {'d_model': 16, 'n_layer': 2, 'n_head': 4, 'model_name': 'UnitTestModel', 'vocab_size': 50, 'trained_skills': [], 'global_step': 0}

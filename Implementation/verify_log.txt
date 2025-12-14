@@ -1,0 +1,53 @@
+F
+======================================================================
+FAIL: test_mlp_router_chain_setup (__main__.TestExperimentChainV2.test_mlp_router_chain_setup)
+Simulates the logic of Experiment Option 3 (MLP Router).
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_flow_v2.py", line 51, in test_mlp_router_chain_setup
+    self.assertIsInstance(layer.gate_row.router, torch.nn.Sequential)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Linear(in_features=80, out_features=48, bias=True) is not an instance of <class 'torch.nn.modules.container.Sequential'>
+
+----------------------------------------------------------------------
+Ran 1 test in 3.662s
+
+FAILED (failures=1)
+
+[Integration] Testing V2 Chain Setup...
+DEBUG: MoEGatedLinear init router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+Model 'dge_exp_20251214_002507' created for experiment.
+Expanding: 64 -> 80 (MLP)
+Expanding DGE Model: d_model 64 -> 80 (Heads: 4 -> 5) (Router: mlp)
+DEBUG: expand_model router_type=mlp
+Expanding Layer 0...
+DEBUG: DGEBlock.expand router_type=mlp
+DEBUG: expand_dge_linear router_type=mlp
+DEBUG: MoEGatedLinear init router_type=mlp
+DEBUG: expand_dge_linear router_type=mlp
+DEBUG: MoEGatedLinear init router_type=mlp
+DEBUG: expand_dge_linear router_type=mlp
+DEBUG: MoEGatedLinear init router_type=mlp
+DEBUG: expand_dge_linear router_type=mlp
+DEBUG: MoEGatedLinear init router_type=mlp
+Expanding Layer 1...
+DEBUG: DGEBlock.expand router_type=mlp
+DEBUG: expand_dge_linear router_type=mlp
+DEBUG: MoEGatedLinear init router_type=mlp
+DEBUG: expand_dge_linear router_type=mlp
+DEBUG: MoEGatedLinear init router_type=mlp
+DEBUG: expand_dge_linear router_type=mlp
+DEBUG: MoEGatedLinear init router_type=mlp
+DEBUG: expand_dge_linear router_type=mlp
+DEBUG: MoEGatedLinear init router_type=mlp
+DEBUG: expand_dge_linear router_type=linear
+DEBUG: MoEGatedLinear init router_type=linear
+Expansion Complete.

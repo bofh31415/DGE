@@ -52,7 +52,8 @@ def generate_batch(task_type, vocab_size, batch_size, seq_len):
     return x, y
 
 def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_len=32, 
-               logger=None, start_step=0, checkpoint_fn=None, optimizer=None, probe_task_type=None):
+               logger=None, start_step=0, checkpoint_fn=None, optimizer=None, probe_task_type=None,
+               sparsity_lambda=0.05):
     print(f"\n--- Starting Training: {task_type.name} ({steps} steps) ---")
     
     if optimizer is None:
@@ -74,7 +75,7 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
         x, y = generate_batch(task_type, vocab_size, batch_size, seq_len)
         
         optimizer.zero_grad()
-        logits, loss = model(x, y)
+        logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
         loss.backward()
         optimizer.step()
         

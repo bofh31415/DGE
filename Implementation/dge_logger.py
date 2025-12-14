@@ -42,7 +42,11 @@ class DGELogger:
                     'Router_Weight_Norm',
                     'Probe_Loss',
                     'Probe_PPL',
-                    'Probe_Gate_Bias_Max'
+                    'Probe_Gate_Bias_Max',
+                    # Rescue Telemetry
+                    'Rescue_Openness_Mean',
+                    'Rescue_Scale_Mean',
+                    'Rescue_Scale_Max'
                 ])
         
         # Log CREATED event
@@ -98,5 +102,9 @@ class DGELogger:
                 f"{metrics.get('Router_Weight_Norm', 0.0):.4f}",
                 f"{metrics.get('Probe_Loss', 0.0):.6f}",
                 f"{metrics.get('Probe_PPL', 0.0):.6f}",
-                f"{metrics.get('Probe_Gate_Bias_Max', 0.0):.4f}"
+                f"{metrics.get('Probe_Gate_Bias_Max', 0.0):.4f}",
+                # Rescue
+                f"{metrics.get('Rescue_Openness_Mean', 0.0):.6f}",
+                f"{metrics.get('Rescue_Scale_Mean', 0.0):.2f}",
+                f"{metrics.get('Rescue_Scale_Max', 0.0):.2f}"
             ])

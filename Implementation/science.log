@@ -320,3 +320,27 @@ Added explicit Bias Freezing logic to `expand_dge_linear`.
 Now registers `frozen_bias_mask` and a hook on `new_layer.bias`.
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
+
+# 2025-12-14: Interference by Gradient Starvation (The "Double Lock" Crisis)
+**Status:** SOLVED
+**Impact:** CRITICAL (Prevented all learning in active capacity)
+
+**Observation:**
+During the integration of the MLP Router (Experiment Chain V2), we observed that while the Router itself was learning (shifting bias), the new weights (`Active_Grad_Norm`) were persistently `0.000000`. This resulted in effective freezing of the new capacity, forcing the model to cannibalize old skills (Catastrophic Forgetting) instead of using the expanded resources.
+
+**Diagnosis:**
+The DGE architecture features a "Double Gate" mechanism (`G_forward = G_row * G_col`).
+1.  **Closed Initialization:** To prevent noise injection, gates are initialized with a strong negative bias (-4.0), resulting in `sigmoid(-4) ≈ 0.018`.
+2.  **Double Attenuation:** The forward pass signal is attenuated by `0.018 * 0.018 ≈ 0.0003`.
+3.  **Backward Pass Starvation:** Gradients flowing back to the weights are *also* multiplied by this factor. Combined with small random initialization of new weights, the gradient signal dropped below machine precision or effective learning thresholds (`< 1e-8`).
+4.  **The "Double Lock":** The weights couldn't learn because the gate was closed. The gate wouldn't open because the weights (being random/zero) offered no improved prediction to drive the gradient descent towards opening.
+
+**Solution: "Gradient Rescue" (Transparent Gradients)**
+We implemented a custom Autograd Function (`RescueHook`) that intervenes in the backward pass.
+-   **Mechanism:** It scales the gradients flowing *through* the gate by `1.0 / max(openness, floor)`.
+-   **Effect:** This effectively "cancels out" the gate's attenuation during the backward pass, making the gate "transparent" to gradients. The weights receive a strong signal (`~30.0` norm verified) even when the gate is 99.9% closed.
+-   **Safety:** A separate `backward_mask` ensures that gradients intended for *frozen* (old) weights are still zeroed out ("Ice Wall"), preserving stability.
+
+**Result:**
+-   `Active_Grad_Norm` recovered from `0.0` to `~30.0`.
+-   Learning enabled immediately upon expansion.

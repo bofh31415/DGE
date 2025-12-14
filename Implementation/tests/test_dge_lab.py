@@ -30,7 +30,7 @@ class TestDGEModel(unittest.TestCase):
         model = DGESimpleTransformer(d_model=32, n_head=4) # head_dim=8
         
         # Expand by 32 (should add 32/8 = 4 heads)
-        model.expand_model(added_d_model=32, quadrant=Quadrant.TOP_LEFT)
+        model.expand_model(new_input_dim=32 + 32, new_output_dim=model.token_emb.num_embeddings, router_type='linear')
         
         self.assertEqual(model.d_model, 64)
         self.assertEqual(model.layers[0].n_head, 8)

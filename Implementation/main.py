@@ -91,6 +91,34 @@ class DGELab:
         print("Saving initial snapshot...")
         self.save_model()
         print("Initial snapshot saved.")
+
+    def reset_model(self):
+        """
+        Resets to a fresh default model for experiments.
+        Used by automated experiment chains.
+        """
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_name = f"dge_exp_{timestamp}"
+        
+        # Default experiment configuration
+        d_model = 64
+        n_layer = 2
+        n_head = 4
+        vocab_size = 500
+        
+        self.model = DGESimpleTransformer(vocab_size=vocab_size, d_model=d_model, n_layer=n_layer, n_head=n_head)
+        self.optimizer = DGEAdamW(self.model.parameters(), lr=1e-3)
+        self.model_name = model_name
+        self.trained_skills = set()
+        self.global_step = 0
+        
+        # Init Logger
+        self.logger = DGELogger(os.path.join(self.models_dir, model_name))
+        model_state = self._get_model_state()
+        self.logger.log_event("CREATED", model_state, step=0)
+        
+        print(f"Model '{model_name}' created for experiment.")
         
     def train_menu(self):
         if self.model is None:
@@ -342,10 +370,10 @@ class DGELab:
             # Re-init optimizer
             # CRITICAL FIX: weight_decay=0.0 is used here too for consistency
             self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
-            print("✅ Model loaded successfully.")
+            print("[OK] Model loaded successfully.")
             
         except (ValueError, FileNotFoundError) as e:
-            print(f"❌ Error loading model: {e}")
+            print(f"[Error] loading model: {e}")
 
     def inspect_model(self):
         if self.model is None:
@@ -426,7 +454,10 @@ class DGELab:
             print("\n" + "="*50)
             print("🧪  EXPERIMENTS MENU")
             print("="*50)
-            print("1. 🔗 Run DGE Validation Chain (Up -> Expand -> Down)")
+            print("1. 🔗 Run DGE Validation Chain (V 0.2.x Baseline)")
+            print("2. 🧪 Run Single Experiment (V 0.2.0 Spec)")
+            print("3. ⛓️  Run Experiment Chain V2 (V 0.3.x - Noise Init Hypotheses)")
+            print("4. ⚙️  Run Experiment Chain V3 (V 0.3.x - Gradient Rescue & Orthogonality)")
             print("b. 🔙 Back")
             print("q. 🚪 Exit")
             
@@ -434,6 +465,282 @@ class DGELab:
             
             if choice == '1':
                 self.run_dge_validation_chain()
+            elif choice == '2':
+                # Single Experiment (Legacy Option 8)
+                print("\\n🧪 RUNNING SINGLE EXPERIMENT (V 0.2.0 Spec)...")
+                self.reset_model()
+                vocab_size = 500
+                
+                # Train Skill A
+                print("Training Skill A (COUNT_UP)...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
+                )
+                self.global_step = new_step
+                self.trained_skills.add(TaskType.COUNT_UP.name)
+                
+                # Expand
+                print("Expanding model...")
+                current_d_model = self.model.d_model
+                self.model.expand_model(new_input_dim=current_d_model + 64, new_output_dim=self.model.token_emb.num_embeddings, router_type='linear')
+                
+                # Split parameters for Differential LR
+                router_params = []
+                default_params = []
+                for name, param in self.model.named_parameters():
+                    if 'router' in name or 'gate' in name:
+                        router_params.append(param)
+                    else:
+                        default_params.append(param)
+                        
+                self.optimizer = DGEAdamW([
+                    {'params': default_params, 'lr': 1e-3},
+                    {'params': router_params, 'lr': 1e-4}
+                ], weight_decay=0.0)
+                
+                # Train Skill B with probing
+                print("Training Skill B (COUNT_DOWN) with Skill A probing...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
+                    probe_task=TaskType.COUNT_UP, sparsity_lambda=0.05
+                )
+                self.global_step = new_step
+                self.trained_skills.add(TaskType.COUNT_DOWN.name)
+                self.save_model("dge_single_exp_custom")
+            elif choice == '4':
+                # Experiment Chain V3
+                print("\\n⚙️ STARTING EXPERIMENT CHAIN V3 (Gradient Rescue & Orthogonality)...")
+                vocab_size = 500
+                
+                # --- EXP 1: H2 Gradient Rescue ---
+                print("\\n🔬 EXP 1: H2 Gradient Rescue (Transparent Gate)")
+                self.reset_model()
+                
+                # Train Skill A
+                print("  Training Skill A (COUNT_UP)...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
+                )
+                self.global_step = new_step
+                
+                # Expand with Rescue
+                print("  Expanding model with Gradient Rescue...")
+                current_d_model = self.model.d_model
+                self.model.expand_model(
+                    new_input_dim=current_d_model + 32, # Conservative width
+                    new_output_dim=self.model.token_emb.num_embeddings, 
+                    router_type='mlp', # Using MLP as base since it had the starvation issue
+                    use_gradient_rescue=True 
+                )
+                
+                # Standard LR split
+                router_params = [p for n, p in self.model.named_parameters() if 'router' in n or 'gate' in n]
+                default_params = [p for n, p in self.model.named_parameters() if 'router' not in n and 'gate' not in n]
+                self.optimizer = DGEAdamW([{'params': default_params, 'lr': 1e-3}, {'params': router_params, 'lr': 1e-4}], weight_decay=0.0)
+                
+                # Train Skill B
+                print("  Training Skill B (COUNT_DOWN)...")
+                train_task(
+                    self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
+                    probe_task_type=TaskType.COUNT_UP, sparsity_lambda=0.05
+                )
+                self.save_model("dge_exp_v3_h2_rescue")
+                
+                # --- EXP 2: H3 Orthogonality ---
+                print("\\n🔬 EXP 2: H3 Orthogonal Initialization")
+                self.reset_model()
+                
+                # Train Skill A
+                print("  Training Skill A (COUNT_UP)...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
+                )
+                self.global_step = new_step
+                
+                # Expand with Ortho
+                print("  Expanding model with Orthogonal Init...")
+                current_d_model = self.model.d_model
+                self.model.expand_model(
+                    new_input_dim=current_d_model + 32, 
+                    new_output_dim=self.model.token_emb.num_embeddings, 
+                    router_type='mlp',
+                    use_orthogonal_init=True,
+                    use_gradient_rescue=True # Combining both for best shot? Or isolated?
+                    # Let's isolate first? No, user wants solution. Optimization implies combining best practices.
+                    # Actually, H3 (Ortho) might mitigate need for Rescue if it aligns better?
+                    # But Rescue fixes the fundamental deadlock mechanism. 
+                    # Let's run H3 WITH Rescue to be safe, or just H3?
+                    # User asked for Orthogonality to avoid tinkering.
+                    # Let's run BOTH for H3.
+                )
+                
+                router_params = [p for n, p in self.model.named_parameters() if 'router' in n or 'gate' in n]
+                default_params = [p for n, p in self.model.named_parameters() if 'router' not in n and 'gate' not in n]
+                self.optimizer = DGEAdamW([{'params': default_params, 'lr': 1e-3}, {'params': router_params, 'lr': 1e-4}], weight_decay=0.0)
+                
+                print("  Training Skill B (COUNT_DOWN)...")
+                train_task(
+                    self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
+                    probe_task_type=TaskType.COUNT_UP, sparsity_lambda=0.05
+                )
+                self.save_model("dge_exp_v3_h3_ortho")
+                
+                # --- EXP 3: H4 Block Diagonal Isolation ---
+                print("\\n🔬 EXP 3: H4 Block Diagonal Isolation")
+                self.reset_model()
+                
+                # Train Skill A
+                print("  Training Skill A (COUNT_UP)...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
+                )
+                self.global_step = new_step
+                
+                # Expand with ISO
+                print("  Expanding model with Block Diagonal Isolation...")
+                current_d_model = self.model.d_model
+                self.model.expand_model(
+                    new_input_dim=current_d_model + 32, 
+                    new_output_dim=self.model.token_emb.num_embeddings, 
+                    router_type='mlp',
+                    use_orthogonal_init=True,
+                    use_gradient_rescue=True,
+                    isolate_cross_terms=True # <--- H4: The key flag
+                )
+                
+                router_params = [p for n, p in self.model.named_parameters() if 'router' in n or 'gate' in n]
+                default_params = [p for n, p in self.model.named_parameters() if 'router' not in n and 'gate' not in n]
+                self.optimizer = DGEAdamW([{'params': default_params, 'lr': 1e-3}, {'params': router_params, 'lr': 1e-4}], weight_decay=0.0)
+                
+                print("  Training Skill B (COUNT_DOWN)...")
+                train_task(
+                    self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
+                    probe_task_type=TaskType.COUNT_UP, sparsity_lambda=0.05
+                )
+                self.save_model("dge_exp_v3_h4_iso")
+                
+            elif choice == '3':
+                # Experiment Chain V2 (Legacy Option 10)
+                print("\\n🧪 STARTING EXPERIMENT CHAIN V2 (Noise Init Hypotheses)...")
+                vocab_size = 500
+                
+                # Experiment 1: MLP Router (Capacity)
+                print("\\n🔬 EXP 1: V 0.3.0 (MLP Router) - Testing H1 (Linear Inseparability)")
+                self.reset_model()
+                
+                # Initial Training Skill A
+                print("  Training Skill A (COUNT_UP)...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
+                )
+                self.global_step = new_step
+                self.trained_skills.add(TaskType.COUNT_UP.name)
+                
+                # Expand with MLP
+                print("  Expanding model with MLP router...")
+                current_d_model = self.model.d_model
+                self.model.expand_model(new_input_dim=current_d_model + 16, new_output_dim=self.model.token_emb.num_embeddings, router_type='mlp')
+                
+                # Differential LR
+                router_params = [p for n, p in self.model.named_parameters() if 'router' in n or 'gate' in n]
+                default_params = [p for n, p in self.model.named_parameters() if 'router' not in n and 'gate' not in n]
+                
+                self.optimizer = DGEAdamW([
+                    {'params': default_params, 'lr': 1e-3},
+                    {'params': router_params, 'lr': 1e-4}
+                ], weight_decay=0.0)
+                
+                # Train Skill B
+                print("  Training Skill B (COUNT_DOWN) with Skill A probing...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
+                    probe_task_type=TaskType.COUNT_UP, sparsity_lambda=0.05
+                )
+                self.global_step = new_step
+                self.trained_skills.add(TaskType.COUNT_DOWN.name)
+                self.save_model("dge_val_0_3_0_mlp")
+
+                # Experiment 2: Strong Sparsity (Constraint)
+                print("\\n🔬 EXP 2: V 0.3.1 (Lambda 0.2) - Testing H2 (Weak Constraint)")
+                self.reset_model()
+                
+                print("  Training Skill A (COUNT_UP)...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
+                )
+                self.global_step = new_step
+                self.trained_skills.add(TaskType.COUNT_UP.name)
+                
+                print("  Expanding model...")
+                current_d_model = self.model.d_model
+                self.model.expand_model(new_input_dim=current_d_model + 16, new_output_dim=self.model.token_emb.num_embeddings, router_type='linear')
+                
+                # Differential LR
+                router_params = [p for n, p in self.model.named_parameters() if 'router' in n or 'gate' in n]
+                default_params = [p for n, p in self.model.named_parameters() if 'router' not in n and 'gate' not in n]
+                
+                self.optimizer = DGEAdamW([
+                    {'params': default_params, 'lr': 1e-3},
+                    {'params': router_params, 'lr': 1e-4}
+                ], weight_decay=0.0)
+                
+                print("  Training Skill B (COUNT_DOWN) with STRONG sparsity...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
+                    probe_task_type=TaskType.COUNT_UP, sparsity_lambda=0.20
+                )
+                self.global_step = new_step
+                self.trained_skills.add(TaskType.COUNT_DOWN.name)
+                self.save_model("dge_val_0_3_1_lambda_0_2")
+
+                # Experiment 3: Low Router LR (Sensitivity)
+                print("\\n🔬 EXP 3: V 0.3.2 (Router LR 5e-5) - Testing H3 (Overshoot)")
+                self.reset_model()
+                
+                print("  Training Skill A (COUNT_UP)...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
+                )
+                self.global_step = new_step
+                self.trained_skills.add(TaskType.COUNT_UP.name)
+                
+                print("  Expanding model...")
+                current_d_model = self.model.d_model
+                self.model.expand_model(new_input_dim=current_d_model + 16, new_output_dim=self.model.token_emb.num_embeddings, router_type='linear')
+                
+                # Differential LR (LOW router LR)
+                router_params = [p for n, p in self.model.named_parameters() if 'router' in n or 'gate' in n]
+                default_params = [p for n, p in self.model.named_parameters() if 'router' not in n and 'gate' not in n]
+                
+                self.optimizer = DGEAdamW([
+                    {'params': default_params, 'lr': 1e-3},
+                    {'params': router_params, 'lr': 5e-5}  # Halved router LR
+                ], weight_decay=0.0)
+                
+                print("  Training Skill B (COUNT_DOWN) with LOW router LR...")
+                new_step = train_task(
+                    self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
+                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
+                    probe_task_type=TaskType.COUNT_UP, sparsity_lambda=0.05
+                )
+                self.global_step = new_step
+                self.trained_skills.add(TaskType.COUNT_DOWN.name)
+                self.save_model("dge_val_0_3_2_low_lr")
+                
+                print("\\n✅ EXPERIMENT CHAIN V2 COMPLETE!")
             elif choice == 'b':
                 break
             elif choice == 'q':
@@ -526,14 +833,14 @@ class DGELab:
         
         # --- Step 4: Expansion ---
         print("\n[Phase 4] Expanding Model (+64 width)...")
-        added_width = 64
-        self.model.expand_model(added_width, quadrant=Quadrant.TOP_LEFT)
+        current_d_model = self.model.d_model
+        self.model.expand_model(new_input_dim=current_d_model + 32, new_output_dim=self.model.token_emb.num_embeddings, router_type='linear')
         
         # Log Expansion
         if self.logger:
             model_state = self._get_model_state()
-            model_state['added_width'] = added_width
-            model_state['quadrant'] = "TOP_LEFT"
+            model_state['added_width'] = 32 # Updated to reflect the new expansion
+            model_state['quadrant'] = "TOP_LEFT" # This might be inferred or removed if not applicable to new signature
             self.logger.log_event("EXPANDED", model_state, step=self.global_step)
             
         # Re-init optimizer
@@ -621,7 +928,7 @@ class DGELab:
             print("x. 🧪  Experiments (Automated)")
             
             print("\n--- System ---")
-            print("q. 🚪  Exit")
+            print("q. 🚪  Exit") # Kept existing 'q' for consistency
             
             choice = input("\nSelect Option: ").strip().lower()
             

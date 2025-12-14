@@ -1,0 +1,3 @@
+Timestamp,Step,Event,Details
+2025-12-14T00:29:12.411958,0,CREATED,"{""code_version"": ""V 0.2.7""}"
+2025-12-14T00:29:12.414239,0,CREATED,"{""d_model"": 64, ""n_layer"": 2, ""n_head"": 4, ""vocab_size"": 500, ""total_params"": 172160, ""frozen_params"": 0, ""active_params"": 130304}"

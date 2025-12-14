@@ -1,0 +1,41 @@
+...FF.........E...
+======================================================================
+ERROR: test_model_expansion (test_dge_lab.TestDGEModel.test_model_expansion)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge_lab.py", line 33, in test_model_expansion
+    model.expand_model(new_input_dim=32 + 32, new_output_dim=model.output_dim, router_type='linear')
+                                                             ^^^^^^^^^^^^^^^^
+  File "C:\Users\Sven\AppData\Roaming\Python\Python313\site-packages\torch\nn\modules\module.py", line 1940, in __getattr__
+    raise AttributeError(
+        f"'{type(self).__name__}' object has no attribute '{name}'"
+    )
+AttributeError: 'DGESimpleTransformer' object has no attribute 'output_dim'
+
+======================================================================
+FAIL: test_expansion_top_left (test_dge.TestDGELinear.test_expansion_top_left)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 139, in test_expansion_top_left
+    self.assertTrue(torch.all(expanded.gate_row.router.bias == -5.0))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: tensor(False) is not true
+
+======================================================================
+FAIL: test_expansion_zero_init (test_dge.TestDGELinear.test_expansion_zero_init)
+CRITICAL TEST: Verifies that new physical weights are initialized to 0.0.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\tests\test_dge.py", line 157, in test_expansion_zero_init
+    self.assertTrue(torch.all(expanded.weight[0:2, 2:4] == 0.0))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: tensor(False) is not true
+
+----------------------------------------------------------------------
+Ran 18 tests in 4.515s
+
+FAILED (failures=2, errors=1)
+Snapshot saved: step_000000
+Model saved to C:\Users\Sven\Documents\DGE\Implementation\tests\test_models\UnitTestModel
+Loading model 'UnitTestModel' with config: {'d_model': 16, 'n_layer': 2, 'n_head': 4, 'model_name': 'UnitTestModel', 'vocab_size': 50, 'trained_skills': [], 'global_step': 0}
+[OK] Model loaded successfully.

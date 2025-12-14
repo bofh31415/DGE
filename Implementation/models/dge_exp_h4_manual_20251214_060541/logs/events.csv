@@ -1,0 +1,5 @@
+Timestamp,Step,Event,Details
+2025-12-14T06:05:41.704611,0,CREATED,"{""code_version"": ""V 0.2.7""}"
+2025-12-14T06:05:41.710669,0,CREATED,"{""d_model"": 64}"
+2025-12-14T06:06:10.150458,499,TRAINED,"{""task"": ""COUNT_UP"", ""steps_trained"": 500, ""start_step"": 0, ""end_step"": 499, ""final_loss"": 0.0007272977381944656, ""final_ppl"": 1.000727562283325, ""duration_sec"": 24.956664323806763}"
+2025-12-14T06:07:46.626156,999,TRAINED,"{""task"": ""COUNT_DOWN"", ""steps_trained"": 500, ""start_step"": 500, ""end_step"": 999, ""final_loss"": 6.828008651733398, ""final_ppl"": 923.3502685485536, ""duration_sec"": 96.43266677856445}"

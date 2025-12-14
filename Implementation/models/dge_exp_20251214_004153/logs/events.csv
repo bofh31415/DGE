@@ -1,0 +1,6 @@
+Timestamp,Step,Event,Details
+2025-12-14T00:41:53.612930,0,CREATED,"{""code_version"": ""V 0.2.7""}"
+2025-12-14T00:41:53.615931,0,CREATED,"{""d_model"": 64, ""n_layer"": 2, ""n_head"": 4, ""vocab_size"": 500, ""total_params"": 172160, ""frozen_params"": 0, ""active_params"": 130304}"
+2025-12-14T00:42:10.946143,499,TRAINED,"{""task"": ""COUNT_UP"", ""steps_trained"": 500, ""start_step"": 0, ""end_step"": 499, ""final_loss"": 0.0007654076907783747, ""final_ppl"": 1.0007657006899948, ""duration_sec"": 17.328656673431396}"
+2025-12-14T00:43:08.306312,999,TRAINED,"{""task"": ""COUNT_DOWN"", ""steps_trained"": 500, ""start_step"": 500, ""end_step"": 999, ""final_loss"": 3.7582013607025146, ""final_ppl"": 42.87124668169773, ""duration_sec"": 57.34016227722168}"
+2025-12-14T00:43:08.337165,1000,SAVED,"{""path"": ""C:\\Users\\Sven\\Documents\\DGE\\Implementation\\models\\dge_exp_20251214_004153"", ""snapshot"": ""dge_val_0_3_1_lambda_0_2""}"

@@ -28,28 +28,29 @@ class TestDGELinear(unittest.TestCase):
     def test_hybrid_gate_behavior(self):
         # Test the HybridGate logic independently
         # Input dim 4, Old count 2 (Static), New count 2 (Dynamic)
-        gate = HybridGate(input_dim=4, old_count=2, new_count=2)
+        # Input dim 8, Old count 4 (Static), New count 4 (Dynamic)
+        gate = HybridGate(input_dim=8, old_count=4, new_count=4)
         
         # Check initialization
         # Old part is buffer
         self.assertTrue(torch.all(gate.old_gate == 1.0))
         # New part is router
         self.assertIsNotNone(gate.router)
-        self.assertTrue(torch.all(gate.router.bias == -5.0), "Closed init") # Closed init
+        self.assertTrue(torch.all(gate.router.bias == -4.0), "Closed init (-4.0 in V 0.2.7)") # Closed init
         
         # Forward Pass
-        x = torch.randn(1, 1, 4)
+        x = torch.randn(1, 1, 8) # Input dim matches gate's input_dim
         output = gate(x)
         
-        # Check shape: [1, 1, 4]
-        self.assertEqual(output.shape, (1, 1, 4))
+        # Check shape: [1, 1, 8]
+        self.assertEqual(output.shape, (1, 1, 8))
         
-        # Check Old Part (Indices 0,1) -> Should be exactly 1.0
-        self.assertTrue(torch.all(output[..., :2] == 1.0))
+        # Check Old Part (Indices 0,1,2,3) -> Should be exactly 1.0
+        self.assertTrue(torch.all(output[..., :4] == 1.0))
         
-        # Check New Part (Indices 2,3) -> Should be sigmoid(-5 + noise) approx 0
-        # With small input, it should be close to sigmoid(-5) ~ 0.006
-        self.assertTrue(torch.all(output[..., 2:] < 0.1))
+        # Check New Part (Indices 4,5,6,7) -> Should be sigmoid(-4 + noise) approx 0
+        # With small input, it should be close to sigmoid(-4) ~ 0.018
+        self.assertTrue(torch.all(output[..., 4:] < 0.1))
 
     def test_forward_pass_base(self):
         layer = MoEGatedLinear(4, 2)
@@ -118,13 +119,24 @@ class TestDGELinear(unittest.TestCase):
         self.assertTrue(torch.all(expanded.backward_mask[2:, :] == 1.0)) # Bottom rows
         self.assertTrue(torch.all(expanded.backward_mask[:, 2:] == 1.0)) # Right cols
         
+        # Check Router Bias (Should be -4.0 now)
+        self.assertTrue(torch.all(expanded.gate_row.router.bias == -4.0))
+        self.assertTrue(torch.all(expanded.gate_col.router.bias == -4.0))
+        
+        # Check New weights (Top-Right, Bottom-Left, Bottom-Right)
+        # V 0.2.7: Noise Init (std=0.001), so they are NOT exactly 0.0 anymore.
+        # But they should be very small.
+        self.assertTrue(torch.all(torch.abs(expanded.weight[0:2, 2:4]) < 0.01)) # Top-Right
+        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 0:2]) < 0.01)) # Bottom-Left
+        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 2:4]) < 0.01)) # Bottom-Right cols
+        
         # Check HybridGate Creation
         self.assertIsInstance(expanded.gate_row, HybridGate)
         self.assertEqual(expanded.gate_row.old_count, 2)
         self.assertEqual(expanded.gate_row.new_count, 2)
         
-        # Check Router Init (Closed) - All elements should be -5.0
-        self.assertTrue(torch.all(expanded.gate_row.router.bias == -5.0))
+        # Check Router Init (Closed) - All elements should be -4.0
+        self.assertTrue(torch.all(expanded.gate_row.router.bias == -4.0))
         
     def test_expansion_zero_init(self):
         """
@@ -140,13 +152,13 @@ class TestDGELinear(unittest.TestCase):
         # 1. Old core (TL) should be 1.0
         self.assertTrue(torch.all(expanded.weight[0:2, 0:2] == 1.0))
         
-        # 2. New areas should be EXACTLY 0.0
+        # 2. New areas should be approximately 0.0 (Noise Init)
         # TR (Old Rows, New Cols)
-        self.assertTrue(torch.all(expanded.weight[0:2, 2:4] == 0.0))
+        self.assertTrue(torch.all(torch.abs(expanded.weight[0:2, 2:4]) < 0.01))
         # BL (New Rows, Old Cols)
-        self.assertTrue(torch.all(expanded.weight[2:4, 0:2] == 0.0))
+        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 0:2]) < 0.01))
         # BR (New Rows, New Cols)
-        self.assertTrue(torch.all(expanded.weight[2:4, 2:4] == 0.0))
+        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 2:4]) < 0.01))
         
     def test_frozen_integrity_adamw(self):
         """
@@ -199,7 +211,14 @@ class TestDGELinear(unittest.TestCase):
         In V 2.0 (MoE), Old gates are buffers, so they shouldn't even have .grad.
         """
         layer = MoEGatedLinear(2, 2)
-        # Expand it so it has gates
+        # Expand by 32 (should add 32/8 = 4 heads)
+        # This line is syntactically incorrect as 'model' is not defined.
+        # Assuming the intent was to replace the expansion call and assign to 'expanded'.
+        # However, without 'model' context, this cannot be directly applied.
+        # Reverting to original expansion for syntactic correctness, as 'model' is undefined.
+        # If 'model' and its methods were defined, the change would be:
+        # expanded = model.expand_model(new_input_dim=32 + 32, new_output_dim=model.token_emb.num_embeddings, router_type='linear')(layer, 2, 2)
+        # For now, keeping the original expansion for a runnable test.
         expanded = expand_dge_linear(layer, 2, 2)
         
         # Check HybridGate structure

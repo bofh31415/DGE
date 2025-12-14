@@ -116,22 +116,37 @@ class HybridGate(nn.Module):
     """
     A Gate that is Static (Always Open) for old indices and Dynamic (MoE) for new indices.
     """
-    def __init__(self, input_dim: int, old_count: int, new_count: int):
+    def __init__(self, input_dim: int, old_count: int, new_count: int, router_type='linear'):
         super().__init__()
         self.old_count = old_count
         self.new_count = new_count
+        self.router_type = router_type
+        self.last_mean_open = 1.0 # Default to 1.0 to avoid zero div
         
         # Static Old Segment (Buffer to freeze it)
         self.register_buffer('old_gate', torch.ones(old_count))
         
         # Dynamic New Segment (Router)
         if new_count > 0:
-            self.router = nn.Linear(input_dim, new_count)
-            # Initialize to Closed (-4.0 bias -> ~1.8% open)
-            # V 0.2.7: Reverted to Closed to protect Skill A.
-            # Gradient flow is now guaranteed by Non-Zero W initialization (see expand_dge_linear).
-            nn.init.constant_(self.router.bias, -4.0)
-            nn.init.kaiming_uniform_(self.router.weight, a=math.sqrt(5))
+            if router_type == 'mlp':
+                # V 0.3.0: MLP Router for Non-Linear Separation
+                hidden_dim = max(16, input_dim // 4)
+                self.router = nn.Sequential(
+                    nn.Linear(input_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, new_count)
+                )
+                # Init last layer to Closed
+                nn.init.constant_(self.router[-1].bias, -4.0)
+                nn.init.kaiming_uniform_(self.router[-1].weight, a=math.sqrt(5))
+            else:
+                # Default Linear Router
+                self.router = nn.Linear(input_dim, new_count)
+                # Initialize to Closed (-4.0 bias -> ~1.8% open)
+                # V 0.2.7: Reverted to Closed to protect Skill A.
+                # Gradient flow is now guaranteed by Non-Zero W initialization (see expand_dge_linear).
+                nn.init.constant_(self.router.bias, -4.0)
+                nn.init.kaiming_uniform_(self.router.weight, a=math.sqrt(5))
         else:
             self.router = None
             
@@ -158,17 +173,23 @@ class HybridGate(nn.Module):
             
             return torch.cat([old_part, new_part], dim=-1)
         else:
-            self.last_mean_open = torch.tensor(0.0, device=x.device)
+            self.last_mean_open = torch.tensor(1.0, device=x.device)
             return old_part
 
 class MoEGatedLinear(nn.Module):
     """
     V 0.2.0: Mixture-of-Experts Gated Linear Layer.
     """
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, router_type='linear'):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
+        self.in_features = in_features
+        self.out_features = out_features
+        self.router_type = router_type 
+        self.use_gradient_rescue = False
+        self.use_gradient_rescue = False
+        self.rescue_strength = 10000.0 # Factor to boost gradient when gate is closed. Needs to be high (e.g. 3000x for double-sigmoid)
         
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
         if bias:
@@ -216,7 +237,11 @@ def expand_dge_linear(
     added_in: int, 
     added_out: int, 
     frozen_core_pos: Quadrant = Quadrant.TOP_LEFT,
-    isolate_cross_terms: bool = False
+    isolate_cross_terms: bool = False,
+
+    router_type='linear',
+    use_gradient_rescue: bool = False,
+    use_orthogonal_init: bool = False
 ) -> MoEGatedLinear:
     """
     Expands a DoubleGateLinear layer by adding input and/or output dimensions.
@@ -231,7 +256,9 @@ def expand_dge_linear(
     new_in = old_in + added_in
     new_out = old_out + added_out
     
-    new_layer = MoEGatedLinear(new_in, new_out, bias=layer.bias is not None)
+    # 2. Create New Layer
+    new_layer = MoEGatedLinear(new_in, new_out, bias=(layer.bias is not None), router_type=router_type)
+    new_layer.use_gradient_rescue = use_gradient_rescue
     
     # Defaults for initialization of new areas
     # Initialize new gates to be OPEN to allow gradient flow to the new zero-weights.
@@ -262,14 +289,10 @@ def expand_dge_linear(
         r_slice = slice(0, old_out)
         c_slice = slice(0, old_in)
         
+        
         # Gate mapping
         r_gate_idx = slice(0, old_out)
         c_gate_idx = slice(0, old_in)
-        
-    new_in = old_in + added_in
-    
-    # 2. Create New Layer
-    new_layer = MoEGatedLinear(new_in, new_out, bias=(layer.bias is not None))
     
     # 3. Copy Weights & Biases (No Grad context for safety)
     with torch.no_grad():
@@ -278,12 +301,52 @@ def expand_dge_linear(
         if layer.bias is not None:
             new_layer.bias[:old_out] = layer.bias
             
-        # Initialize New Weights (Sidecar & Cross) to Small Noise (V 0.2.7)
-        # We need Non-Zero weights to allow gradient flow to the Gate.
-        # dL/dGate = dL/dOut * Weight. If Weight=0, Gate cannot learn.
-        # With Gate=-4.0 (0.018), and Weight=1e-3, effective noise is 1e-5. Identity Safe.
-        nn.init.normal_(new_layer.weight[old_out:, :], mean=0.0, std=0.001)
-        nn.init.normal_(new_layer.weight[:, old_in:], mean=0.0, std=0.001)
+        # Initialize New Weights (Sidecar & Cross)
+        if use_orthogonal_init:
+            # H3: Orthogonal Initialization
+            # Project new weights to be orthogonal to old weights
+            # Shape [new_out, new_in]. 
+            # We treat the weight matrix as a set of row vectors? Or column vectors?
+            # Usually we want inputs to be distinct (Dimensions). Orthogonalize new columns w.r.t old columns.
+            
+            # 1. New Input Features (Right Side) - Columns
+            if added_in > 0:
+                # Orthogonalize [:, old_in:] w.r.t [:, :old_in]
+                # But we already zeroed it? No, we init with noise first.
+                noise_in = torch.randn(new_out, added_in, device=layer.weight.device) * 0.01 # Small noise
+                
+                if old_in > 0:
+                    # Projection: W_new = Noise - W_old @ (W_old.T @ W_old)^-1 @ W_old.T @ Noise 
+                    # Simplified: Gram-Schmidt like subtraction.
+                    # Or just use QR on the whole concatenated matrix [W_old | Noise]?
+                    # We want to keep W_old EXACTLY as is.
+                    # So we project Noise onto nullspace of W_old.
+                    
+                    # W_old [Out, Old_In]
+                    # We want W_new [Out, Add_In] such that columns of W_new are perp to columns of W_old?
+                    # No, usually rows are the features of the neuron. 
+                    # If we add neurons (Rows), we want new rows perp to old rows.
+                    # If we add inputs (Cols), we want new cols perp to old cols?
+                    pass 
+                    
+                # For now, simple small noise is standard. Orthogonal init fully compliant requires care.
+                # Let's use standard init for now but projected. 
+                # Implementing simple QR based generation for the new block independently.
+                nn.init.orthogonal_(new_layer.weight[:, old_in:]) 
+                new_layer.weight[:, old_in:] *= 0.1 # V3 Fix: Increased from 0.01 to 0.1 to ensure dGate signal (avoid Double Lock)
+                
+            # 2. New Output Features (Bottom Side) - Rows
+            if added_out > 0:
+                nn.init.orthogonal_(new_layer.weight[old_out:, :])
+                new_layer.weight[old_out:, :] *= 0.1
+
+        else:
+            # Standard Noise Init (V 0.2.7)
+            # We need Non-Zero weights to allow gradient flow to the Gate.
+            # dL/dGate = dL/dOut * Weight. If Weight=0, Gate cannot learn.
+            # With Gate=-4.0 (0.018), and Weight=1e-3, effective noise is 1e-5. Identity Safe.
+            nn.init.normal_(new_layer.weight[old_out:, :], mean=0.0, std=0.001)
+            nn.init.normal_(new_layer.weight[:, old_in:], mean=0.0, std=0.001)
         
         # Clean up bias for new rows
         if layer.bias is not None:
@@ -313,10 +376,10 @@ def expand_dge_linear(
     # Usually Router sees the ful input `x`. So `new_in`.
     
     # Gate Col (Inputs)
-    new_layer.gate_col = HybridGate(input_dim=new_in, old_count=old_in, new_count=added_in)
+    new_layer.gate_col = HybridGate(input_dim=new_in, old_count=old_in, new_count=added_in, router_type=router_type)
     
     # Gate Row (Outputs)
-    new_layer.gate_row = HybridGate(input_dim=new_in, old_count=old_out, new_count=added_out)
+    new_layer.gate_row = HybridGate(input_dim=new_in, old_count=old_out, new_count=added_out, router_type=router_type)
     
     # 5. Gradient Masking (Backward Hook)
     # 1 = Update, 0 = Freeze.
@@ -326,8 +389,7 @@ def expand_dge_linear(
     # Isolate Cross Terms (Sidecar Mode)
     if isolate_cross_terms:
         # Cross Terms: Old->New and New->Old
-        # We typically zero them out or freeze them at 0.
-        # If we init to 0 and freeze, they stay 0.
+        # We freeze them at 0.0 (Mask = 0).
         # Top-Right (Old In -> New Out)
         mask[old_out:, :old_in] = 0.0 
         # Bottom-Left (New In -> Old Out)
@@ -339,6 +401,58 @@ def expand_dge_linear(
         return grad * new_layer.backward_mask
         
     new_layer.weight.register_hook(hook_fn)
+    
+    # 7. Gradient Rescue Hook (H2)
+    # Applied BEFORE the Ice Wall (Mask) because hooks execute in reverse registration order (LIFO).
+    # We want Rescue -> Boost Grad -> Mask -> Zero if Frozen.
+    # So we register Rescue LAST (so it runs FIRST).
+    if new_layer.use_gradient_rescue:
+        def rescue_hook(grad):
+            # Check gate status
+            # We need the mean open value from the forward pass.
+            # We have gate_col and gate_row.
+            # The weight connects In -> Out.
+            # Gradient comes from Out.
+            # Effectively, dL/dW = (dL/dOut_Lin)^T @ x_in.
+            # x_in was gated by gate_col. 
+            # dL/dOut_Lin passed through gate_row? No, gate_row is after.
+            # So Weight sees the effect of BOTH gates.
+            # If EITHER is closed, gradient is killed.
+            
+            # Get combined openness estimate (min/mul)
+            # Use small epsilon to avoid div by zero
+            openness = 1.0
+            if new_layer.gate_col:
+                openness *= new_layer.gate_col.last_mean_open
+            if new_layer.gate_row:
+                openness *= new_layer.gate_row.last_mean_open
+                
+            # If openness is small (e.g. 0.01), grad is suppressed by 0.01 (or 0.01^2).
+            # We compensate.
+            # Clamp openness to avoid explosion.
+            # Effective Openness Floor: 1e-4 (allows for double-closed gates ~0.018^2 = 0.0003)
+            eff_openness = max(float(openness), 0.0001) 
+            scale_factor = 1.0 / eff_openness
+            
+            # Limit strictness of rescue
+            scale_factor = min(scale_factor, new_layer.rescue_strength) 
+            
+            # Store telemetry for logging (User Request: "add all data to the forensic log")
+            if not hasattr(new_layer, 'rescue_stats'):
+                new_layer.rescue_stats = {'openness': 0.0, 'scale': 1.0, 'count': 0}
+            
+            # Simple moving average or just last value? 
+            # Since this runs every backward pass, let's store the last value for simplicity,
+            # or an exponential moving average if we want stability.
+            # But validate_dge_integrity runs frequently. Let's just key off "last".
+            new_layer.last_rescue_openness = openness
+            new_layer.last_rescue_scale = scale_factor
+            
+
+            
+            return grad * scale_factor
+            
+        new_layer.weight.register_hook(rescue_hook)
     
     # 6. Freeze Bias (V 0.1.5 Fix)
     if new_layer.bias is not None:
