@@ -1,0 +1,62 @@
+# DGE Future Roadmap: Universal Modality Expansion
+# =================================================
+
+The DGE methodology (Directed Synergy) solves the "Shared Embedding" problem for text. The next frontier is unifying ALL modalities (Vision, Audio, Sensor Data) into a single, expanding "Brain" that grows distinct cortical regions for each sense while allowing synergy (e.g., Image Captioning) via cross-terms.
+
+## 1. The "Sensorium" (Universal Input Layer)
+Current `DGESimpleTransformer` uses a rigid `nn.Embedding` (Integers -> Vector).
+**Goal:** Replace the Input Layer with a "Modality Adapter Module".
+
+*   **Logic:** Detect input type (or receive `modality_id`) -> Route to specific projector -> Output `d_model` vector.
+*   **Adapters:**
+    *   `token_embed`: Standard Text (Current).
+    *   `patch_embed`: Vision (ViT-style convolution for 16x16 patches).
+    *   `audio_embed`: Audio (Spectrogram projection).
+    *   `sensor_embed`: Industrial (Raw float stream projection).
+
+## 2. The "Actuators" (Multi-Head Output)
+Current `lm_head` is text-only.
+**Goal:** Implement a "Head Bank".
+
+*   **Logic:** Route final hidden state to the task-appropriate head.
+*   **Heads:**
+    *   `lm_head`: Next token prediction (vocab_size).
+    *   `pixel_head`: Image generation (pixel regression or VQ-VAE codebook).
+    *   `class_head`: Classification labels (CIFAR-100/ImageNet).
+    *   `continuous_head`: Regression (Stock prices, Servo control).
+
+## 3. The "Brain" (Contextual Router++2.0)
+Current Bigram Router uses `t-1` (Temporal Context).
+**Goal:** Abstract "Context" for spatial/static data.
+
+*   **Spatial Context (Images):** Router context = Neighboring Patches, not just previous time-step.
+*   **Modality Tokens:** Insert `[VISION_START]` tokens so the Router immediately switches context from "Language" to "Visual".
+*   **Mechanism:** This ensures the Router opens "Visual Quadrants" ($Q_{BL}$) for images and keeps "Language Quadrants" ($Q_{Core}$) protected, preventing interference.
+
+## 4. Training Curriculum (The "Cortical Growth" Plan)
+**Step 1: The Linguistic Core (TinyStories)**
+*   Train DGE on Text. 
+*   Result: A robust Language Model occupying the Core.
+
+**Step 2: The Visual Cortex (Expansion)**
+*   Expand Model Width.
+*   Train on Image Patches (CIFAR/ImageNet).
+*   **Dynamics:** 
+    *   Router receives Visual Context.
+    *   Router CLOSES Language Gates (Protecting TinyStories).
+    *   Router OPENS Expansion Gates ($Q_{BL}$).
+    *   Result: A model with distinct Text and Vision regions.
+
+**Step 3: Synergy (Multimodal Tasks)**
+*   Train on Image-Caption pairs.
+*   **Dynamics:**
+    *   Input: Image ($Q_{BL}$) -> Target: Text ($Q_{Core}$).
+    *   The Cross-Terms ($Q_{TL} / Q_{BR}$) activate.
+    *   The model learns to "Read" visual features into language space.
+    *   Result: A VQA (Visual Question Answering) system that hasn't forgotten how to tell stories.
+
+## 5. Unthinkable Modalities
+The same logic applies to specific industrial data (e.g., Vibration sensors on machines).
+*   **Old Knowledge:** General physics/math learned from text/code.
+*   **New Modality:** Raw sensor data.
+*   **Synergy:** The model uses its general reasoning (Core) to detect anomalies in the sensor stream (Expansion) via cross-term transfer.
