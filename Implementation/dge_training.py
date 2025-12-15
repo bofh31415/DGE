@@ -53,7 +53,7 @@ def generate_batch(task_type, vocab_size, batch_size, seq_len):
 
 def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_len=32, 
                logger=None, start_step=0, checkpoint_fn=None, optimizer=None, probe_task_type=None,
-               sparsity_lambda=0.05):
+               sparsity_lambda=0.05, **kwargs):
     print(f"\n--- Starting Training: {task_type.name} ({steps} steps) ---")
     
     if optimizer is None:
@@ -69,15 +69,48 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
     # Use existing unified log
     current_step = start_step # Initialize to start
     
+    replay_tasks = kwargs.get('replay_tasks', [])
+    
     for i in range(steps):
         current_step = start_step + i
         
-        x, y = generate_batch(task_type, vocab_size, batch_size, seq_len)
+        # Determine if this step is for Replay (Odd steps)
+        # Only if we have replay tasks
+        is_replay_step = (len(replay_tasks) > 0) and (i % 2 != 0)
         
-        optimizer.zero_grad()
-        logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
-        loss.backward()
-        optimizer.step()
+        if is_replay_step:
+            # Replay Logic: Train Router Only
+            # Pick a task (round robin or random - use simple modulo for now)
+            replay_idx = (i // 2) % len(replay_tasks)
+            r_task = replay_tasks[replay_idx]
+            
+            x, y = generate_batch(r_task, vocab_size, batch_size, seq_len)
+            
+            optimizer.zero_grad()
+            logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
+            loss.backward()
+            
+            # ASYMMETRIC REPLAY: Zero out gradients for non-router parameters
+            # This forces the router to learn to CLOSE for the old task (rejection)
+            for name, param in model.named_parameters():
+                if "router" not in name and "gate" not in name:
+                    param.grad = None
+            
+            optimizer.step()
+            
+            # For logging/printing, we might want to skip or log specially
+            # But to keep main loop simple, let's just proceed.
+            # Maybe print specific message?
+            # print(f"  [Replay {r_task.name}] Loss: {loss.item():.4f}")
+            
+        else:
+            # Main Task Logic: Train Everything
+            x, y = generate_batch(task_type, vocab_size, batch_size, seq_len)
+            
+            optimizer.zero_grad()
+            logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
+            loss.backward()
+            optimizer.step()
         
         # --- Forensic Logging ---
         # --- Forensic Logging ---

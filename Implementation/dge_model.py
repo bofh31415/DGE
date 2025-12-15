@@ -65,7 +65,7 @@ class DGEBlock(nn.Module):
         
         return x
 
-    def expand(self, added_width, new_n_head, quadrant, router_type='linear', use_gradient_rescue=True, use_orthogonal_init=False, isolate_cross_terms=False, cross_term_policy='full', router_init_bias=-4.0, gating_threshold: float = 0.0):
+    def expand(self, added_width, new_n_head, quadrant, router_type='bigram', use_gradient_rescue=True, use_orthogonal_init=False, isolate_cross_terms=False, cross_term_policy='full', router_init_bias=0.0, gating_threshold: float = 0.0):
         """
         Expand the block width by added_width. Usually d_model -> d_model + added_width.
         """
@@ -128,7 +128,7 @@ class DGESimpleTransformer(nn.Module):
         
         return logits, total_loss
 
-    def expand_model(self, new_input_dim, new_output_dim, router_type='linear', use_gradient_rescue=True, use_orthogonal_init=False, isolate_cross_terms=False, cross_term_policy='full', router_init_bias=-4.0, gating_threshold: float = 0.0):
+    def expand_model(self, new_input_dim, new_output_dim, router_type='bigram', use_gradient_rescue=True, use_orthogonal_init=False, isolate_cross_terms=False, cross_term_policy='full', router_init_bias=0.0, gating_threshold: float = 0.0):
         """
         Expands the model capacity using DGE.
         Returns a new DGEModel instance (or mutates self).

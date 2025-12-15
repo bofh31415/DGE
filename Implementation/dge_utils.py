@@ -369,7 +369,7 @@ class HybridGate(nn.Module):
     """
     A Gate that is Static (Always Open) for old indices and Dynamic (MoE) for new indices.
     """
-    def __init__(self, input_dim: int, old_count: int, new_count: int, router_type='linear', router_init_bias=-4.0, gating_threshold: float = 0.0):
+    def __init__(self, input_dim: int, old_count: int, new_count: int, router_type='bigram', router_init_bias=0.0, gating_threshold: float = 0.0):
         super().__init__()
         self.old_count = old_count
         self.new_count = new_count
@@ -506,7 +506,7 @@ class MoEGatedLinear(nn.Module):
     """
     V 0.2.0: Mixture-of-Experts Gated Linear Layer.
     """
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, router_type='linear', router_init_bias=-4.0, gating_threshold: float = 0.0):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, router_type='bigram', router_init_bias=0.0, gating_threshold: float = 0.0):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -567,7 +567,7 @@ def expand_dge_linear(
     isolate_cross_terms: bool = False,
     cross_term_policy: str = 'full', # 'full', 'block_diagonal', 'imprint'
 
-    router_type='linear',
+    router_type='bigram',
     use_gradient_rescue: bool = True, # ADOPTED: V26 Strategy (Default On)
     use_orthogonal_init: bool = False, # ADOPTED: V26 Strategy (Default Zero Init for Safe Replay)
     router_init_bias: float = 0.0, # DIRECTED SYNERGY: Start Open (Life Support)

@@ -147,15 +147,33 @@ class DGELab:
                 self.logger.log_event("CHECKPOINT", {"step": step}, step=step)
 
             if choice == '1':
+                # Identify Replay Tasks (Everything learned EXCEPT current task)
+                replay_list = []
+                for skill_name in self.trained_skills:
+                    if skill_name != TaskType.COUNT_UP.name:
+                        replay_list.append(TaskType[skill_name])
+                
+                print(f"Replay Tasks: {[t.name for t in replay_list]}")
+
                 steps = int(input("Steps (default 500): ") or 500)
                 new_step = train_task(self.model, TaskType.COUNT_UP, vocab_size=vocab, steps=steps, 
-                                     logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn)
+                                     logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn,
+                                     replay_tasks=replay_list)
                 self.global_step = new_step
                 self.trained_skills.add(TaskType.COUNT_UP.name)
             elif choice == '2':
+                # Identify Replay Tasks (Everything learned EXCEPT current task)
+                replay_list = []
+                for skill_name in self.trained_skills:
+                    if skill_name != TaskType.COUNT_DOWN.name:
+                        replay_list.append(TaskType[skill_name])
+                
+                print(f"Replay Tasks: {[t.name for t in replay_list]}")
+
                 steps = int(input("Steps (default 500): ") or 500)
                 new_step = train_task(self.model, TaskType.COUNT_DOWN, vocab_size=vocab, steps=steps, 
-                                     logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn)
+                                     logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn,
+                                     replay_tasks=replay_list)
                 self.global_step = new_step
                 self.trained_skills.add(TaskType.COUNT_DOWN.name)
             else:
@@ -190,12 +208,20 @@ class DGELab:
             
             # H4 Update: Calculate absolute new dimension and enforce protections
             new_d_model = self.model.d_model + added
+            # V26 (DGE 0.4.0) BEST PRACTICES:
+            # - Bigram Router: Contextual gating solves aliasing
+            # - Open Init (0.0): Ensures plasticity
+            # - No Isolation: Allow Synergy
+            # - No Ortho Init: Prevent attenuation
             self.model.expand_model(new_input_dim=new_d_model, 
                                   new_output_dim=self.model.token_emb.num_embeddings,
-                                  router_type='mlp',
-                                  isolate_cross_terms=True, 
+                                  router_type='bigram', # V26
+                                  isolate_cross_terms=False, # V26
                                   use_gradient_rescue=True, 
-                                  use_orthogonal_init=True)
+                                  use_orthogonal_init=False, # V26
+                                  router_init_bias=0.0, # V26
+                                  gating_threshold=0.0 # V26
+                                  )
             
             # Log expansion with updated model state
             if self.logger:
