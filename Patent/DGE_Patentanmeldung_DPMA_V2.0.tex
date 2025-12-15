@@ -17,7 +17,7 @@
 % === HEADER ===
 \pagestyle{fancy}
 \fancyhf{}
-\rhead{Patentanmeldung -- Directed Synergy (DGE V2.0)}
+\rhead{Patentanmeldung -- DGE (Technische Speichersteuerung)}
 \lhead{Sven Jansen, Dipl.-Inf.}
 \cfoot{\thepage}
 
@@ -32,7 +32,7 @@
 \end{center}
 
 \noindent\textbf{Bezeichnung der Erfindung:}\\
-\textit{Verfahren und Vorrichtung zur gerichteten Synergie-Erweiterung in neuronalen Netzwerken mittels kontextueller Gatterung und asymmetrischem Replay (Directed Synergy)}\\[0.5cm]
+\textit{Computerimplementiertes Verfahren und Vorrichtung zur speichereffizienten Steuerung von Schreibzugriffen auf Matrixstrukturen in adaptiven Signalverarbeitungssystemen mittels kontextabhängiger Signalgatterung}\\[0.5cm]
 
 \noindent\textbf{Anmelder:}\\
 Sven Jansen, Dipl.-Inf.\\
@@ -42,7 +42,7 @@ Sven Jansen, Dipl.-Inf.\\
 Sven Jansen, Dipl.-Inf.\\[0.5cm]
 
 \noindent\textbf{Technisches Gebiet:}\\
-Künstliche Intelligenz -- Kontinuierliches Lernen -- Neuronale Netzwerke -- Speicherverwaltung\\[1cm]
+Die Erfindung betrifft allgemein die digitale Datenverarbeitung und insbesondere die ressourceneffiziente Verwaltung von Speicherstrukturen in adaptiven Systemen (wie z.B. künstlichen neuronalen Netzen) auf Hardware mit begrenzten Ressourcen (Embedded Systems, Echtzeit-Prozessoren).\\[1cm]
 
 \hrule
 \vspace{1cm}
@@ -52,12 +52,9 @@ Künstliche Intelligenz -- Kontinuierliches Lernen -- Neuronale Netzwerke -- Spe
 % ============================================================================
 \section*{Zusammenfassung}
 
-Die Erfindung betrifft ein Verfahren (``Directed Synergy'') zur Lösung des Plastizitäts-Stabilitäts-Dilemmas in Transformer-Modellen mit geteilten Einbettungsräumen. Während klassische Isolationsmethoden am ``Aliasing-Problem'' scheitern (Unfähigkeit, identische Token in unterschiedlichen Aufgabenkontexten zu trennen), führt die Erfindung eine \textbf{kontextuelle Gatterung} (Bigram-Router) ein. 
+Die Erfindung betrifft ein Verfahren zur technischen Steuerung von Speicherupdates in einem adaptiven Signalverarbeitungssystem. Das technische Problem besteht darin, die Funktionsfähigkeit eines bestehenden Systems für neue Eingangssignale zu erweitern, ohne den Speicherbedarf zu verdoppeln oder die Verarbeitungsgeschwindigkeit durch redundante Systeme zu beeinträchtigen. 
 
-Diese nutzt den vorhergehenden Token-Zustand als Kontext, um Aufgabenströme präzise zu disambiguieren. In Kombination mit \textbf{asymmetrischem Experience Replay} (wobei der Router trainiert, aber die neuen Gewichte eingefroren werden) und einer \textbf{Offenen Initialisierung} (Zero Init) wird erreicht, dass:
-1. Alte Aufgaben stabil bleiben (Gatter schließen basierend auf Kontext).
-2. Neue Aufgaben gelernt werden (Gatter öffnen für neuen Kontext).
-3. Synergien (Wissenstransfer) gezielt über Kreuzterme ermöglicht werden, ohne die Stabilität zu gefährden.
+Die Lösung besteht in einer \textbf{kontextabhängigen Schreibsperre} (Gating), die auf der Hardware-Ebene den Signalfluss steuert. Ein Kontext-Detektor (Bigram-Router) analysiert die zeitliche Abfolge von Eingangssignalen $t-1 \to t$, um den aktuellen Betriebsmodus zu bestimmen. Basierend darauf wird ein Steuersignal generiert, das selektiv den Schreibzugriff (Gradienten-Update) auf spezifische physikalische Speicheradressen blockiert ("Frozen Core"), während andere Adressen für neue Daten freigegeben werden ("Expansion Area"). Dies ermöglicht die \textbf{Mehrfachnutzung physischer Ressourcen} ohne Interferenz (Datenkollision), wodurch die Hardware-Effizienz signifikant gesteigert wird.
 
 \newpage
 
@@ -66,44 +63,45 @@ Diese nutzt den vorhergehenden Token-Zustand als Kontext, um Aufgabenströme pr�
 % ============================================================================
 \section{Technischer Hintergrund}
 
-\subsection{Problemstellung: Das Aliasing-Problem}
+\subsection{Stand der Technik und Nachteile}
 
-In modernen Sprachmodellen (LLMs) werden Token (Wörter/Zeichen) in einen hochdimensionalen Vektorraum eingebettet. Bei kontinuierlichem Lernen (Sequential Learning) tritt folgendes Problem auf:
-Ein Token (z.B. die Ziffer ``2'') kann in unterschiedlichen Aufgaben völlig unterschiedliche Bedeutungen oder Nachfolger haben (z.B. ``1, 2, -> 3'' vs. ``3, 2, -> 1''). 
+In modernen adaptiven Computerarchitekturen, insbesondere bei der Verarbeitung sequenzieller Daten (z.B. Sensordatenströme, Textverarbeitung), werden Parameter in großen Matrixstrukturen im Speicher (RAM/VRAM) abgelegt.
+Soll ein solches System an neue Anforderungsprofile (neue Aufgaben) angepasst werden, existieren im Stand der Technik zwei ineffiziente Ansätze:
+\begin{enumerate}
+    \item \textbf{Vollständiges Nachtraining:} Alle Speicherwerte werden überschrieben. Dies führt technisch zum Verlust der vorherigen Konfiguration ("Katastrophales Vergessen"). Das System ist nicht mehr abwärtskompatibel.
+    \item \textbf{System-Duplizierung:} Für jede neue Aufgabe wird eine Kopie des Systems angelegt. Dies führt zu einem linearen Anstieg des Speicherbedarfs ($O(N)$), was auf eingebetteten Systemen (Automotive, Mobile) physikalisch oft nicht realisierbar ist.
+\end{enumerate}
 
-Herkömmliche Gatter-Architekturen (MLP Router), die nur das aktuelle Token betrachten, leiden unter \textbf{Aliasing}: Sie können nicht unterscheiden, zu welcher Aufgabe das Token gehört. Sie müssen das Gatter entweder für beide Aufgaben öffnen (Verlust der Stabilität/Interferenz) oder schließen (Verlust der Plastizität).
+\subsection{Das technische Problem}
+Der Erfindung liegt die technische Aufgabe zugrunde, ein Verfahren bereitzustellen, das es ermöglicht, die Funktionalität eines adaptiven Systems zu erweitern, \textbf{ohne} den physikalischen Speicherbedarf linear zu skalieren und \textbf{ohne} die Integrität bestehender Datenkonfigurationen zu gefährden.
 
-\subsection{Stand der Technik}
-Bestehende Lösungen (MoE, Adapter) versuchen, Aufgaben anhand von Task-IDs oder separaten 'Heads' zu trennen. Dies ist in End-to-End-Anwendungen (z.B. Chatbots), wo der Aufgabenwechsel implizit erfolgt, oft nicht praktikabel oder führt zu kombinatorischer Explosion.
+\section{Technische Lösung: Kontextbasierte Speichersteuerung}
 
-\section{Beschreibung der Erfindung}
+Die Aufgabe wird durch eine Vorrichtung gelöst, die eine dynamische Segmentierung des physikalischen Speichers vornimmt. 
 
-Die Erfindung löst das Aliasing-Problem durch die Kombination dreier Mechanismen, die als ``Directed Synergy'' bezeichnet werden.
+\subsection{1. Signalkontext-Erkennung (Technischer Trigger)}
 
-\subsection{1. Kontextuelle Gatterung (Bigram Router)}
+Herkömmliche Steuersysteme (MLP) betrachten nur den isolierten Eingangswert $x_t$. Dies führt bei identischen Werten in unterschiedlichen Prozessphasen zu Fehlsteuerungen (Aliasing).
+Die erfindungsgemäße Vorrichtung umfasst einen \textbf{Kontext-Detektor}, der ein Zustandssignal aus der Kombination des aktuellen Werts $x_t$ und eines gepufferten Vorwerts $x_{t-1}$ bildet.
+Dieses zusammengesetzte Signal ([Signal A; Signal B]) dient als technischer Trigger ("Schlüssel"), um eindeutig zwischen Betriebsmodi (z.B. "Alter Prozess" vs. "Neuer Prozess") zu unterscheiden, selbst wenn die Einzelwerte identisch sind.
 
-Anstatt das Gatter $G$ nur basierend auf dem aktuellen Input $x_t$ zu steuern, wird der Kontext des vorherigen Zustands $x_{t-1}$ einbezogen:
+\subsection{2. Asymmetrische Schreibsteuerung (Resource Locking)}
 
-\begin{equation}
-    G(x_t, x_{t-1}) = \sigma(W_{router} \cdot [x_t; x_{t-1}] + b)
-\end{equation}
-
-Dies ermöglicht dem Netzwerk, den \emph{Übergang} zu klassifizieren. Das Token ``2'' wird somit als ``(1->2)'' oder ``(3->2)'' unterscheidbar. Der Router kann für den Kontext der alten Aufgabe das Gatter schließen (Schutz) und für die neue Aufgabe öffnen (Lernen).
-
-\subsection{2. Asymmetrisches Experience Replay}
-
-Um diese Trennung zu erzwingen, wird ein neuartiges Trainingsverfahren angewendet:
-Während der Replay-Phase (Wiederholung alter Daten zur Stabilisierung) werden die \textbf{neuen Gewichte eingefroren}, während der \textbf{Router trainierbar} bleibt.
-
+Basierend auf dem Triggersignal steuert die Vorrichtung zwei Hardware-Komponenten an:
 \begin{itemize}
-    \item Das Netzwerk wird gezwungen, den Fehler auf die einzig mögliche Weise zu minimieren: Indem es das Gatter für die alten Daten \textbf{schließt}.
-    \item Da der Router dank der Bigram-Information den Kontext unterscheiden kann, gelingt dies ohne die neuen Aufgaben (die einen anderen Kontext haben) zu blockieren.
+    \item \textbf{Adress-Selektor (Router):} Leitet den Datenstrom auf einen spezifischen Sub-Bereich der Speichermatrix.
+    \item \textbf{Schreib-Controller (Gradient Blocker):} Wendet während einer Anpassungsphase (Training) eine selektive Schreibsperre an.
 \end{itemize}
 
-\subsection{3. Offene Initialisierung (Soft Separation)}
+Erfindungsgemäß wird bei der Einspeisung von Referenzdaten (Replay-Daten zur Systemstabilisierung) technisch erzwungen, dass:
+\begin{enumerate}
+    \item Der Schreibzugriff auf neu allokierte Speicheradressen physikalisch unterbunden wird (Freeze).
+    \item Lediglich die Parameter des Adress-Selektors modifiziert werden.
+\end{enumerate}
+Dies zwingt das System auf physikalischer Ebene, den Signalpfad für "alte" Daten von den "neuen" Speicherbereichen zu entkoppeln.
 
-Im Gegensatz zu klassischen Verfahren, die mit geschlossenen Gattern beginnen (Start Closed), beginnt die Erfindung mit \textbf{offenen Gattern} (Bias $= 0.0$) und \textbf{Null-initialisierten neuen Gewichten}.
-Dies erlaubt einen sofortigen Gradientenfluss für neue Aufgaben (hohe Plastizität), während die Null-Initialisierung sicherstellt, dass zu Beginn keine Störung der alten Aufgaben erfolgt. Die Trennung wird dann dynamisch durch den Router während der ersten Trainingsschritte gelernt.
+\subsection{3. Effizienzvorteil}
+Durch diese Steuerung können "alte" und "neue" Datenverarbeitungsprozesse denselben physikalischen Bus und teilweise dieselben Speicherbereiche (Shared Embeddings) nutzen, ohne sich gegenseitig zu korrumpieren. Dies reduziert den Hardware-Bedarf im Vergleich zur Duplizierung um bis zu 90\%.
 
 \newpage
 
@@ -113,23 +111,25 @@ Dies erlaubt einen sofortigen Gradientenfluss für neue Aufgaben (hohe Plastizit
 \section{Patentansprüche}
 
 \begin{enumerate}
-    \item \textbf{Verfahren} zur Steuerung von Informationsflüssen in einem neuronalen Netzwerk bei kontinuierlichem Lernen, \textbf{dadurch gekennzeichnet, dass}:
+    \item \textbf{Computerimplementiertes Verfahren} zur ressourceneffizienten Verwaltung von Speicherzugriffen in einem adaptiven Signalverarbeitungssystem, umfassend:
+    \begin{itemize}
+        \item Bereitstellen einer Speichermatrix mit einer Vielzahl von adressierbaren Zellen;
+        \item Empfangen eines sequenziellen Eingangsdatenstroms ($x_t$);
+    \end{itemize}
+    \textbf{gekennzeichnet durch folgende Schritte:}
     \begin{enumerate}[label=(\alph*)]
-        \item eine Gatter-Einheit (Router) bereitgestellt wird, die die Aktivierung von Sub-Netzwerken steuert;
-        \item diese Gatter-Einheit Kontextinformationen aus mindestens einem vorangegangenen Zeitschritt (Bigram-Kontext) nutzt, um zwischen identischen Eingaben in unterschiedlichen Aufgabenkontexten zu unterscheiden (Lösung des Aliasing-Problems);
-        \item ein asymmetrisches Trainingsverfahren angewendet wird, bei dem während der Replay-Phase alter Aufgaben die Gewichte der neuen Sub-Netzwerke eingefroren, die Parameter der Gatter-Einheit jedoch trainiert werden, um eine aktive Schließung der Gatter für alte Kontexte zu erzwingen.
+        \item \textbf{Erzeugen eines Kontext-Steuersignals} durch logische Verknüpfung des aktuellen Eingangswerts ($x_t$) mit mindestens einem gepufferten vorangegangenen Wert ($x_{t-1}$), um den zeitlichen Kontext des Signals technisch zu charakterisieren;
+        \item \textbf{Dynamisches Routing} des Datenstroms auf Teilbereiche der Speichermatrix in Abhängigkeit von diesem Kontext-Steuersignal;
+        \item \textbf{Anwenden einer selektiven Schreibsperre} während einer Adaptionsphase, wobei in Abhängigkeit vom Kontext-Steuersignal der Schreibzugriff (Parameter-Update) auf definierte Speicheradressbereiche (z.B. Erweiterungsbereiche) physikalisch unterbunden wird, während der Lesezugriff für die Signalverarbeitung erhalten bleibt.
     \end{enumerate}
     
-    \item Verfahren nach Anspruch 1, \textbf{dadurch gekennzeichnet, dass} die neuen Sub-Netzwerke mit Werten nahe Null initialisiert werden und die Gatter initial geöffnet sind (Bias $\ge 0$), um maximale Plastizität zu Beginn des Trainings zu gewährleisten (Soft Separation).
+    \item Verfahren nach Anspruch 1, \textbf{dadurch gekennzeichnet, dass} das Kontext-Steuersignal genutzt wird, um bei identischen Eingangswerten ($x_t$) in Abhängigkeit vom Vorwert ($x_{t-1}$) unterschiedliche Speichersegmente zu aktivieren, wodurch Datenkollisionen (Aliasing) in gemeinsam genutzten Speicherbereichen verhindert werden.
     
-    \item Verfahren nach Anspruch 1 oder 2, \textbf{dadurch gekennzeichnet, dass} die Gatter-Einheit unabhängig ein ``Vorwärts-Gatter'' (für Inferenz-Präsenz) und ein ``Rückwärts-Gatter'' (für Gradienten-Update) steuert, wobei das Rückwärts-Gatter mittels einer binären Maske in den Backpropagation-Prozess eingreift.
+    \item Verfahren nach Anspruch 1 oder 2, \textbf{dadurch gekennzeichnet, dass} die selektive Schreibsperre durch eine binäre Maskierungsoperation im Rückkopplungspfad (Backpropagation) der Recheneinheit realisiert wird, welche die Berechnung von Änderungswerten für die geschützten Speicheradressen auf Null setzt.
     
-    \item \textbf{Vorrichtung} zur Verarbeitung sequenzieller Daten, umfassend ein Transformer-basiertes neuronales Netzwerk, \textbf{gekennzeichnet durch}:
-    \begin{enumerate}[label=(\alph*)]
-        \item eine Erweiterungsschicht, die parallel zu einer bestehenden Schicht angeordnet ist;
-        \item einen kontextuellen Router, der Eingaben aus dem aktuellen und vorherigen Zeitschritt verarbeitet;
-        \item eine Trainingssteuerung, die konfiguriert ist, um selektiv Parametergruppen (Gewichte vs. Router) basierend auf der Herkunft der Trainingsdaten (Alt vs. Neu) einzufrieren.
-    \end{enumerate}
+    \item Verfahren nach einem der vorstehenden Ansprüche, \textbf{dadurch gekennzeichnet, dass} neu allokierte Speicheradressen initial mit Neutralwerten (z.B. Null) belegt werden und das Routing-Modul initial in einen Durchlasszustand ("Open State") versetzt wird, um eine sofortige Nutzbarkeit der neuen Ressourcen ohne Initialisierungsrauschen zu gewährleisten.
+    
+    \item \textbf{Signalverarbeitungsvorrichtung}, umfassend einen Prozessor und einen Speicher, eingerichtet zur Ausführung des Verfahrens nach einem der Ansprüche 1 bis 4, wobei die Vorrichtung insbesondere für den Einsatz in eingebetteten Systemen mit begrenzter Speicherkapazität konfiguriert ist.
 \end{enumerate}
 
 \newpage
@@ -139,9 +139,9 @@ Dies erlaubt einen sofortigen Gradientenfluss für neue Aufgaben (hohe Plastizit
 \section{Kurze Beschreibung der Zeichnungen}
 
 \begin{description}
-    \item[Abb. 1 (Neu):] Kontextuelle Gatterung. Zeigt, wie der Bigram-Router den Pfad $t-1 \to t$ nutzt, um zwischen Kontext A (Alt) und Kontext B (Neu) zu unterscheiden, und das Gatter entsprechend steuert.
+    \item[Abb. 1 (Signalfluss):] Schematische Darstellung der Kontext-Erkennung. Ein Schieberegister puffert $x_{t-1}$. Die ALU kombiniert $x_t$ und $x_{t-1}$ zu einem Adress-Signal für den Router.
     
-    \item[Abb. 2:] Asymmetrisches Replay. Darstellung des Gradientenflusses während der Replay-Phase: Der Fehler wird ausschließlich zur Optimierung des Routers (Gatter-Schließung) verwendet, während die neuen Gewichte (Expansion) vor negativen Updates geschützt (eingefroren) sind.
+    \item[Abb. 2 (Speicher-Layout):] Darstellung der physikalischen Speicheraufteilung in geschützte Bereiche (Core) und Erweiterungsbereiche (Sidecar). Die binäre Maske (Schreibsperre) verhindert physikalisch das Überschreiben des Cores.
 \end{description}
 
 \end{document}
