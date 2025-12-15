@@ -132,6 +132,8 @@ class DGELab:
             print("="*50)
             print("1. 📈 Count Up (Next Number)")
             print("2. 📉 Count Down (Previous Number)")
+            print("e. 🧠  Expand Model")
+            print("f. 📊  Full Skill Benchmark")
             print("b. 🔙 Back")
             
             choice = input("\nSelect Training Task: ").strip().lower()
@@ -178,6 +180,10 @@ class DGELab:
                                      replay_tasks=replay_list)
                 self.global_step = new_step
                 self.trained_skills.add(TaskType.COUNT_DOWN.name)
+            elif choice == 'e':
+                self.expand_menu()
+            elif choice == 'f':
+                self.benchmark_skills()
             else:
                 print("❌ Invalid option")
                 continue
@@ -1059,7 +1065,7 @@ class DGELab:
                 
             print("\n--- Core Actions ---")
             print("0. 🆕 Create New Model")
-            print("2. 📂 Load Model")
+            print("l. 📂 Load Model")
             print("t. 🏋️  Train Model")
             print("e. 🧠  Expand Model")
             print("s. 💾  Save Model")
@@ -1077,7 +1083,7 @@ class DGELab:
             
             if choice == '0':
                 self.create_model()
-            elif choice == '2':
+            elif choice == 'l':
                 self.load_menu()
             elif choice == 't':
                 self.train_menu()
