@@ -1,0 +1,147 @@
+\documentclass[a4paper, 11pt]{article}
+
+% === PACKAGES ===
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{tikz}
+\usetikzlibrary{matrix,positioning,arrows.meta,calc,shapes.geometric,patterns}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{array}
+
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+% === HEADER ===
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Patentanmeldung -- Directed Synergy (DGE V2.0)}
+\lhead{Sven Jansen, Dipl.-Inf.}
+\cfoot{\thepage}
+
+\begin{document}
+
+% ============================================================================
+% DECKBLATT
+% ============================================================================
+\begin{center}
+\Large\textbf{PATENTANMELDUNG}\\[0.5cm]
+\large beim Deutschen Patent- und Markenamt (DPMA)\\[1cm]
+\end{center}
+
+\noindent\textbf{Bezeichnung der Erfindung:}\\
+\textit{Verfahren und Vorrichtung zur gerichteten Synergie-Erweiterung in neuronalen Netzwerken mittels kontextueller Gatterung und asymmetrischem Replay (Directed Synergy)}\\[0.5cm]
+
+\noindent\textbf{Anmelder:}\\
+Sven Jansen, Dipl.-Inf.\\
+[Adresse]\\[0.5cm]
+
+\noindent\textbf{Erfinder:}\\
+Sven Jansen, Dipl.-Inf.\\[0.5cm]
+
+\noindent\textbf{Technisches Gebiet:}\\
+Künstliche Intelligenz -- Kontinuierliches Lernen -- Neuronale Netzwerke -- Speicherverwaltung\\[1cm]
+
+\hrule
+\vspace{1cm}
+
+% ============================================================================
+% ZUSAMMENFASSUNG
+% ============================================================================
+\section*{Zusammenfassung}
+
+Die Erfindung betrifft ein Verfahren (``Directed Synergy'') zur Lösung des Plastizitäts-Stabilitäts-Dilemmas in Transformer-Modellen mit geteilten Einbettungsräumen. Während klassische Isolationsmethoden am ``Aliasing-Problem'' scheitern (Unfähigkeit, identische Token in unterschiedlichen Aufgabenkontexten zu trennen), führt die Erfindung eine \textbf{kontextuelle Gatterung} (Bigram-Router) ein. 
+
+Diese nutzt den vorhergehenden Token-Zustand als Kontext, um Aufgabenströme präzise zu disambiguieren. In Kombination mit \textbf{asymmetrischem Experience Replay} (wobei der Router trainiert, aber die neuen Gewichte eingefroren werden) und einer \textbf{Offenen Initialisierung} (Zero Init) wird erreicht, dass:
+1. Alte Aufgaben stabil bleiben (Gatter schließen basierend auf Kontext).
+2. Neue Aufgaben gelernt werden (Gatter öffnen für neuen Kontext).
+3. Synergien (Wissenstransfer) gezielt über Kreuzterme ermöglicht werden, ohne die Stabilität zu gefährden.
+
+\newpage
+
+% ============================================================================
+% BESCHREIBUNG
+% ============================================================================
+\section{Technischer Hintergrund}
+
+\subsection{Problemstellung: Das Aliasing-Problem}
+
+In modernen Sprachmodellen (LLMs) werden Token (Wörter/Zeichen) in einen hochdimensionalen Vektorraum eingebettet. Bei kontinuierlichem Lernen (Sequential Learning) tritt folgendes Problem auf:
+Ein Token (z.B. die Ziffer ``2'') kann in unterschiedlichen Aufgaben völlig unterschiedliche Bedeutungen oder Nachfolger haben (z.B. ``1, 2, -> 3'' vs. ``3, 2, -> 1''). 
+
+Herkömmliche Gatter-Architekturen (MLP Router), die nur das aktuelle Token betrachten, leiden unter \textbf{Aliasing}: Sie können nicht unterscheiden, zu welcher Aufgabe das Token gehört. Sie müssen das Gatter entweder für beide Aufgaben öffnen (Verlust der Stabilität/Interferenz) oder schließen (Verlust der Plastizität).
+
+\subsection{Stand der Technik}
+Bestehende Lösungen (MoE, Adapter) versuchen, Aufgaben anhand von Task-IDs oder separaten 'Heads' zu trennen. Dies ist in End-to-End-Anwendungen (z.B. Chatbots), wo der Aufgabenwechsel implizit erfolgt, oft nicht praktikabel oder führt zu kombinatorischer Explosion.
+
+\section{Beschreibung der Erfindung}
+
+Die Erfindung löst das Aliasing-Problem durch die Kombination dreier Mechanismen, die als ``Directed Synergy'' bezeichnet werden.
+
+\subsection{1. Kontextuelle Gatterung (Bigram Router)}
+
+Anstatt das Gatter $G$ nur basierend auf dem aktuellen Input $x_t$ zu steuern, wird der Kontext des vorherigen Zustands $x_{t-1}$ einbezogen:
+
+\begin{equation}
+    G(x_t, x_{t-1}) = \sigma(W_{router} \cdot [x_t; x_{t-1}] + b)
+\end{equation}
+
+Dies ermöglicht dem Netzwerk, den \emph{Übergang} zu klassifizieren. Das Token ``2'' wird somit als ``(1->2)'' oder ``(3->2)'' unterscheidbar. Der Router kann für den Kontext der alten Aufgabe das Gatter schließen (Schutz) und für die neue Aufgabe öffnen (Lernen).
+
+\subsection{2. Asymmetrisches Experience Replay}
+
+Um diese Trennung zu erzwingen, wird ein neuartiges Trainingsverfahren angewendet:
+Während der Replay-Phase (Wiederholung alter Daten zur Stabilisierung) werden die \textbf{neuen Gewichte eingefroren}, während der \textbf{Router trainierbar} bleibt.
+
+\begin{itemize}
+    \item Das Netzwerk wird gezwungen, den Fehler auf die einzig mögliche Weise zu minimieren: Indem es das Gatter für die alten Daten \textbf{schließt}.
+    \item Da der Router dank der Bigram-Information den Kontext unterscheiden kann, gelingt dies ohne die neuen Aufgaben (die einen anderen Kontext haben) zu blockieren.
+\end{itemize}
+
+\subsection{3. Offene Initialisierung (Soft Separation)}
+
+Im Gegensatz zu klassischen Verfahren, die mit geschlossenen Gattern beginnen (Start Closed), beginnt die Erfindung mit \textbf{offenen Gattern} (Bias $= 0.0$) und \textbf{Null-initialisierten neuen Gewichten}.
+Dies erlaubt einen sofortigen Gradientenfluss für neue Aufgaben (hohe Plastizität), während die Null-Initialisierung sicherstellt, dass zu Beginn keine Störung der alten Aufgaben erfolgt. Die Trennung wird dann dynamisch durch den Router während der ersten Trainingsschritte gelernt.
+
+\newpage
+
+% ============================================================================
+% ANSPRÜCHE
+% ============================================================================
+\section{Patentansprüche}
+
+\begin{enumerate}
+    \item \textbf{Verfahren} zur Steuerung von Informationsflüssen in einem neuronalen Netzwerk bei kontinuierlichem Lernen, \textbf{dadurch gekennzeichnet, dass}:
+    \begin{enumerate}[label=(\alph*)]
+        \item eine Gatter-Einheit (Router) bereitgestellt wird, die die Aktivierung von Sub-Netzwerken steuert;
+        \item diese Gatter-Einheit Kontextinformationen aus mindestens einem vorangegangenen Zeitschritt (Bigram-Kontext) nutzt, um zwischen identischen Eingaben in unterschiedlichen Aufgabenkontexten zu unterscheiden (Lösung des Aliasing-Problems);
+        \item ein asymmetrisches Trainingsverfahren angewendet wird, bei dem während der Replay-Phase alter Aufgaben die Gewichte der neuen Sub-Netzwerke eingefroren, die Parameter der Gatter-Einheit jedoch trainiert werden, um eine aktive Schließung der Gatter für alte Kontexte zu erzwingen.
+    \end{enumerate}
+    
+    \item Verfahren nach Anspruch 1, \textbf{dadurch gekennzeichnet, dass} die neuen Sub-Netzwerke mit Werten nahe Null initialisiert werden und die Gatter initial geöffnet sind (Bias $\ge 0$), um maximale Plastizität zu Beginn des Trainings zu gewährleisten (Soft Separation).
+    
+    \item Verfahren nach Anspruch 1 oder 2, \textbf{dadurch gekennzeichnet, dass} die Gatter-Einheit unabhängig ein ``Vorwärts-Gatter'' (für Inferenz-Präsenz) und ein ``Rückwärts-Gatter'' (für Gradienten-Update) steuert, wobei das Rückwärts-Gatter mittels einer binären Maske in den Backpropagation-Prozess eingreift.
+    
+    \item \textbf{Vorrichtung} zur Verarbeitung sequenzieller Daten, umfassend ein Transformer-basiertes neuronales Netzwerk, \textbf{gekennzeichnet durch}:
+    \begin{enumerate}[label=(\alph*)]
+        \item eine Erweiterungsschicht, die parallel zu einer bestehenden Schicht angeordnet ist;
+        \item einen kontextuellen Router, der Eingaben aus dem aktuellen und vorherigen Zeitschritt verarbeitet;
+        \item eine Trainingssteuerung, die konfiguriert ist, um selektiv Parametergruppen (Gewichte vs. Router) basierend auf der Herkunft der Trainingsdaten (Alt vs. Neu) einzufrieren.
+    \end{enumerate}
+\end{enumerate}
+
+\newpage
+% ============================================================================
+% ZEICHNUNGSERLÄUTERUNGEN
+% ============================================================================
+\section{Kurze Beschreibung der Zeichnungen}
+
+\begin{description}
+    \item[Abb. 1 (Neu):] Kontextuelle Gatterung. Zeigt, wie der Bigram-Router den Pfad $t-1 \to t$ nutzt, um zwischen Kontext A (Alt) und Kontext B (Neu) zu unterscheiden, und das Gatter entsprechend steuert.
+    
+    \item[Abb. 2:] Asymmetrisches Replay. Darstellung des Gradientenflusses während der Replay-Phase: Der Fehler wird ausschließlich zur Optimierung des Routers (Gatter-Schließung) verwendet, während die neuen Gewichte (Expansion) vor negativen Updates geschützt (eingefroren) sind.
+\end{description}
+
+\end{document}
