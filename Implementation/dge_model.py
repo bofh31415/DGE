@@ -11,9 +11,10 @@ class DGEBlock(nn.Module):
         self.router_type = router_type # Store router_type for potential future use or consistency
         
         # Simple Attention projections
-        # For simplicity in this lab, we use one large linear for QKV
-        # and one for Output.
-        self.w_qkv = MoEGatedLinear(d_model, 3 * d_model)
+        # V12: Separate Q, K, V layers to fix "Structural Shuffle" bug during expansion
+        self.w_q = MoEGatedLinear(d_model, d_model)
+        self.w_k = MoEGatedLinear(d_model, d_model)
+        self.w_v = MoEGatedLinear(d_model, d_model)
         self.w_o = MoEGatedLinear(d_model, d_model)
         
         # MLP
@@ -34,8 +35,10 @@ class DGEBlock(nn.Module):
         B, T, C = x.size()
         
         # QKV
-        qkv = self.w_qkv(x) # [B, T, 3*C]
-        q, k, v = qkv.chunk(3, dim=-1)
+        # V12: Separate Forward
+        q = self.w_q(x)
+        k = self.w_k(x)
+        v = self.w_v(x)
         
         # Reshape for multi-head attention
         # [B, T, n_head, head_dim] -> [B, n_head, T, head_dim]
@@ -62,23 +65,20 @@ class DGEBlock(nn.Module):
         
         return x
 
-    def expand(self, added_width, new_n_head, quadrant, router_type='linear', use_gradient_rescue=False, use_orthogonal_init=False, isolate_cross_terms=False):
+    def expand(self, added_width, new_n_head, quadrant, router_type='linear', use_gradient_rescue=True, use_orthogonal_init=False, isolate_cross_terms=False, cross_term_policy='full', router_init_bias=-4.0, gating_threshold: float = 0.0):
         """
         Expand the block width by added_width. Usually d_model -> d_model + added_width.
         """
-        # Expand QKV: In +added, Out +3*added
-        # Note: Q,K,V are interleaved. DoubleGateLinear is unaware of this structure.
-        # This is a simplification. For rigorous RoPE preservation, we'd need structured expansion.
-        # For the Lab, we will accept a simple expansion where we trust the linear layer resizing.
-        # But wait - if we just expand 3*d_model output, it might mix Q/K/V quadrants messy.
-        # For a proper LAB demo of DGE mechanics, standard linear expansion is fine to show GATING.
-        # We will keep it simple.
+        # Expand QKV: In +added, Out +added (each)
+        # V12: Separate Expansion
+        self.w_q = expand_dge_linear(self.w_q, added_in=added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, cross_term_policy=cross_term_policy, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
+        self.w_k = expand_dge_linear(self.w_k, added_in=added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, cross_term_policy=cross_term_policy, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
+        self.w_v = expand_dge_linear(self.w_v, added_in=added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, cross_term_policy=cross_term_policy, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
         
-        self.w_qkv = expand_dge_linear(self.w_qkv, added_in=added_width, added_out=3*added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init)
-        self.w_o = expand_dge_linear(self.w_o, added_in=added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init) 
+        self.w_o = expand_dge_linear(self.w_o, added_in=added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, cross_term_policy=cross_term_policy, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, router_init_bias=router_init_bias, gating_threshold=gating_threshold) 
         
-        self.w_mlp_in = expand_dge_linear(self.w_mlp_in, added_in=added_width, added_out=4*added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init)
-        self.w_mlp_out = expand_dge_linear(self.w_mlp_out, added_in=4*added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init)
+        self.w_mlp_in = expand_dge_linear(self.w_mlp_in, added_in=added_width, added_out=4*added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, cross_term_policy=cross_term_policy, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
+        self.w_mlp_out = expand_dge_linear(self.w_mlp_out, added_in=4*added_width, added_out=added_width, frozen_core_pos=quadrant, isolate_cross_terms=isolate_cross_terms, cross_term_policy=cross_term_policy, router_type=router_type, use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
         
         self.d_model += added_width
         self.n_head = new_n_head # Update head count
@@ -128,7 +128,7 @@ class DGESimpleTransformer(nn.Module):
         
         return logits, total_loss
 
-    def expand_model(self, new_input_dim, new_output_dim, router_type='linear', use_gradient_rescue=False, use_orthogonal_init=False, isolate_cross_terms=False):
+    def expand_model(self, new_input_dim, new_output_dim, router_type='linear', use_gradient_rescue=True, use_orthogonal_init=False, isolate_cross_terms=False, cross_term_policy='full', router_init_bias=-4.0, gating_threshold: float = 0.0):
         """
         Expands the model capacity using DGE.
         Returns a new DGEModel instance (or mutates self).
@@ -153,7 +153,7 @@ class DGESimpleTransformer(nn.Module):
         # new_n_head = new_d_model // current_head_dim
 
         # The instruction's print statement:
-        # print(f"Expanding DGE Model: {self.input_dim}x{self.output_dim} -> {new_input_dim}x{new_output_dim} (Router: {router_type})") (Heads: {self.layers[0].n_head} -> {new_n_head})")
+        # print(f"Expanding DGE Model: {self.input_dim}x{self.output_dim} -> {new_input_dim}x{new_output_dim} (Heads: {self.layers[0].n_head} -> {new_n_head})")
         # This is syntactically incorrect and refers to non-existent attributes (self.input_dim, self.output_dim).
         # I will use the new_input_dim as the new d_model and infer added_d_model.
         
@@ -163,7 +163,7 @@ class DGESimpleTransformer(nn.Module):
         current_head_dim = self.d_model // self.layers[0].n_head
         new_n_head = new_input_dim // current_head_dim # Assuming head_dim remains constant
         
-        print(f"Expanding DGE Model: d_model {self.d_model} -> {new_input_dim} (Heads: {self.layers[0].n_head} -> {new_n_head}) (Router: {router_type}) [Rescue: {use_gradient_rescue}, Ortho: {use_orthogonal_init}, BlockDiag: {isolate_cross_terms}]")
+        print(f"Expanding DGE Model: d_model {self.d_model} -> {new_input_dim} (Heads: {self.layers[0].n_head} -> {new_n_head}) (Router: {router_type}) [Rescue: {use_gradient_rescue}, Ortho: {use_orthogonal_init}, BlockDiag: {isolate_cross_terms}, Policy: {cross_term_policy}, Threshold: {gating_threshold}]")
         
         # Expand Embedding
         self.token_emb = expand_embedding(self.token_emb, added_d_model)
@@ -178,7 +178,7 @@ class DGESimpleTransformer(nn.Module):
             # It calls expand_dge_linear internally.
             # We need to update DGEBlock.expand signature as well.
             layer.expand(added_d_model, new_n_head, quadrant=Quadrant.TOP_LEFT, router_type=router_type, 
-                         use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, isolate_cross_terms=isolate_cross_terms) 
+                         use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, isolate_cross_terms=isolate_cross_terms, cross_term_policy=cross_term_policy, router_init_bias=router_init_bias, gating_threshold=gating_threshold) 
 
         # Expand Head
         # The instruction snippet had `ge_linear(self.lm_head, added_in=added_d_model, added_out=0, frozen_core_pos=quadrant)`
@@ -189,7 +189,20 @@ class DGESimpleTransformer(nn.Module):
         # If `new_output_dim` is meant to change the vocab_size, then `added_out` should be `new_output_dim - self.lm_head.out_features`.
         # Given the instruction, it's ambiguous. I'll stick to the original `added_out=0` for `lm_head` for now,
         # as the primary expansion seems to be `d_model`.
-        self.lm_head = expand_dge_linear(self.lm_head, added_in=added_d_model, added_out=0, frozen_core_pos=Quadrant.TOP_LEFT, isolate_cross_terms=isolate_cross_terms) # Assuming quadrant is still relevant
+        # Expand LM Head
+        self.lm_head = expand_dge_linear(
+            self.lm_head, 
+            added_in=added_d_model, 
+            added_out=0, 
+            frozen_core_pos=Quadrant.TOP_LEFT, 
+            isolate_cross_terms=isolate_cross_terms,
+            cross_term_policy='full', # CRITICAL: Head MUST see new features!
+            router_type=router_type,
+            use_gradient_rescue=use_gradient_rescue,
+            use_orthogonal_init=use_orthogonal_init,
+            router_init_bias=router_init_bias,
+            gating_threshold=gating_threshold
+        )
         
         self.d_model = new_input_dim # Update d_model to the new value
         print("Expansion Complete.")

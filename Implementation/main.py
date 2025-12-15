@@ -11,6 +11,7 @@ import time
 import json
 import shutil
 from dge_utils import DGEAdamW
+import argparse
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -467,6 +468,81 @@ class DGELab:
         
         if self.logger:
             self.logger.log_event("BENCHMARK", results, step=self.global_step)
+
+    def _run_experiment_by_choice(self, choice: str):
+        """
+        Run an experiment by its menu choice string.
+        Used by CLI mode (-x flag) for non-interactive execution.
+        """
+        choice = choice.strip().lower()
+        
+        if choice == '1':
+            self.run_dge_validation_chain()
+        elif choice == '2':
+            # Single Experiment (Legacy Option 8)
+            print("\n🧪 RUNNING SINGLE EXPERIMENT (V 0.2.0 Spec)...")
+            self.reset_model()
+            vocab_size = 500
+            
+            # Train Skill A
+            print("Training Skill A (COUNT_UP)...")
+            new_step = train_task(
+                self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
+                logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
+            )
+            self.global_step = new_step
+            self.trained_skills.add(TaskType.COUNT_UP.name)
+            
+            # Expand
+            print("Expanding model...")
+            current_d_model = self.model.d_model
+            self.model.expand_model(new_input_dim=current_d_model + 64, 
+                              new_output_dim=self.model.token_emb.num_embeddings, 
+                              router_type='mlp',
+                              isolate_cross_terms=True,
+                              use_gradient_rescue=True,
+                              use_orthogonal_init=True)
+            
+            # Split parameters for Differential LR
+            router_params = []
+            default_params = []
+            for name, param in self.model.named_parameters():
+                if 'router' in name or 'gate' in name:
+                    router_params.append(param)
+                else:
+                    default_params.append(param)
+                    
+            self.optimizer = DGEAdamW([
+                {'params': default_params, 'lr': 1e-3},
+                {'params': router_params, 'lr': 1e-4}
+            ], weight_decay=0.0)
+            
+            # Train Skill B with probing
+            print("Training Skill B (COUNT_DOWN) with Skill A probing...")
+            new_step = train_task(
+                self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
+                logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
+                probe_task=TaskType.COUNT_UP, sparsity_lambda=0.05
+            )
+            self.global_step = new_step
+            self.trained_skills.add(TaskType.COUNT_DOWN.name)
+            self.save_model("dge_single_exp_custom")
+        elif choice == '17':
+            import run_v21_rbf
+            print("\n🧪 Running V21 RBF Verification...")
+            run_v21_rbf.run_experiment()
+        elif choice == '18':
+            import run_synergy_experiment
+            print("\n🟢 Running Directed Synergy Experiment...")
+            run_synergy_experiment.run_synergy_experiment()
+        else:
+            print(f"❌ Unknown experiment choice: '{choice}'")
+            print("Available experiments: 1, 2, 17, 18")
+            print("  1: DGE Validation Chain (V 0.2.x Baseline)")
+            print("  2: Single Experiment (V 0.2.0 Spec)")
+            print("  17: Verify V21 RBF (Imprint + Rescue V4)")
+            print("  18: Directed Synergy (Phase 2 Seed Fund)")
+
     def experiment_menu(self):
         while True:
             print("\n" + "="*50)
@@ -476,6 +552,8 @@ class DGELab:
             print("2. 🧪 Run Single Experiment (V 0.2.0 Spec)")
             print("3. ⛓️  Run Experiment Chain V2 (V 0.3.x - Noise Init Hypotheses)")
             print("4. ⚙️  Run Experiment Chain V3 (V 0.3.x - Gradient Rescue & Orthogonality)")
+            print("17. 🧪 Verify V21 RBF (Imprint + Rescue V4)")
+            print("18. 🟢 Directed Synergy (Phase 2 Seed Fund)")
             print("b. 🔙 Back")
             print("q. 🚪 Exit")
             
@@ -764,6 +842,14 @@ class DGELab:
                 self.save_model("dge_val_0_3_2_low_lr")
                 
                 print("\\n✅ EXPERIMENT CHAIN V2 COMPLETE!")
+            elif choice == '17':
+                import run_v21_rbf
+                print("\n🧪 Running V21 RBF Verification...")
+                run_v21_rbf.run_experiment()
+            elif choice == '18':
+                import run_synergy_experiment
+                print("\n🟢 Running Directed Synergy Experiment...")
+                run_synergy_experiment.run_synergy_experiment()
             elif choice == 'b':
                 break
             elif choice == 'q':
@@ -986,5 +1072,19 @@ class DGELab:
                 print("❌ Invalid option.")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="DGE Lab V" + __version__)
+    parser.add_argument('-x', '--experiment', type=str, metavar='N',
+                        help='Run experiment N directly and exit (e.g., -x 18 for Directed Synergy)')
+    args = parser.parse_args()
+    
     lab = DGELab()
-    lab.run()
+    
+    if args.experiment:
+        # Direct experiment execution mode
+        exp_choice = args.experiment.strip().lower()
+        print(f"\n🚀 CLI Mode: Running Experiment '{exp_choice}'...")
+        lab._run_experiment_by_choice(exp_choice)
+        print("\n✅ Experiment complete. Exiting.")
+    else:
+        # Interactive mode
+        lab.run()

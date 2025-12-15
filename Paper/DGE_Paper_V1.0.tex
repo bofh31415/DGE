@@ -25,7 +25,7 @@
 \newtheorem{corollary}{Corollary}
 
 % Metadata
-\title{\textbf{Double Gate Extension (DGE): Decoupling Inference and Training for Perfect Continual Learning}}
+\title{\textbf{Double Gate Extension (DGE): Soft Separation via Experience Replay}}
 \author{Dipl.-Inf. Sven Jansen}
 \date{December 2024}
 
@@ -34,29 +34,27 @@
 \maketitle
 
 \begin{abstract}
-Continual learning in neural networks faces the fundamental \textbf{Plasticity-Stability Dilemma}: new learning must modify weights (plasticity), but old knowledge is encoded in those same weights (stability). We present the \textbf{Double Gate Extension (DGE)}, a novel architectural solution that \emph{decouples} these constraints through a dual-gate mechanism. Each weight matrix is controlled by two independent gate sets: \textbf{Forward Gates} ($G_{fwd}$) that control signal visibility during inference, and \textbf{Backward Gates} ($G_{bwd}$) that control gradient flow during training. This separation enables the network to \emph{use} old knowledge ($G_{fwd}$ open) while \emph{protecting} it from modification ($G_{bwd}$ closed). We prove that this provides a \textbf{mathematical guarantee} against catastrophic forgetting, not merely a regularization technique. Furthermore, we introduce a \textbf{configurable frozen core topology} that enables experimentation with different expansion patterns. DGE extends the Gated Ghost Expansion (GGE) framework while maintaining compatibility with RoPE-based architectures.
+Continual learning in neural networks aims to resolve the \textbf{Plasticity-Stability Dilemma}: how to learn new tasks (plasticity) without erasing old knowledge (stability). While strict architectural separation offers a theoretical guarantee against forgetting, our experiments show that in deep transformers with shared embeddings, "Strict Separation" is often intractable due to leakage ("Leakage Creep") or computational cost (RBF routers). We introduce \textbf{Double Gate Extension (DGE) with Soft Separation}, a pragmatic framework that combines architectural gating with \textbf{Experience Replay}. By decoupling training dynamics via Backward Gates ($G_{bwd}$) and employing \textbf{Zero Initialization} for new parameters, DGE enables a router to learn task discrimination dynamically. We demonstrate that while strict isolation fails, DGE augmented with a 10\% replay buffer achieves high plasticity (Loss $\approx 1.0$) and high stability (Probe Loss $\approx 2.0$, reduced from 16.0), providing a robust solution for real-world continual learning.
 \end{abstract}
 
-\section{Introduction: The Plasticity-Stability Dilemma}
+\section{Introduction: The Pragmatics of Continual Learning}
 
-The central challenge of continual learning can be formalized as a conflict between two objectives:
+The Plasticity-Stability Dilemma remains the central challenge of continual learning. Approaches typically fall into three categories: Regularization (EWC), Replay (ER), and Architecture (MoE/Adapters).
 
-\begin{definition}[Plasticity]
-The ability of a neural network to adapt its weights $W$ in response to new training data $\mathcal{D}_{new}$.
-\end{definition}
-
-\begin{definition}[Stability]
-The requirement that performance on previously learned tasks $\mathcal{D}_{old}$ remains unchanged.
-\end{definition}
-
-Traditional approaches address this dilemma through:
+\subsection{The Failure of Strict Separation}
+Our investigation revealed that relying solely on architectural barriers ("Strict Separation") is fragile in deep networks:
 \begin{itemize}
-    \item \textbf{Regularization methods} (EWC, SI): Penalize changes to ``important'' weights
-    \item \textbf{Replay methods}: Mix old data with new during training
-    \item \textbf{Architecture methods}: Allocate separate capacity for each task
+    \item \textbf{MLP Routers}: Suffer from OOD generalization. Even with hard thresholding, small activations leak and amplify through layers ("Leakage Creep"), leading to catastrophic forgetting.
+    \item \textbf{RBF Routers}: While geometrically sound for separation, they scale poorly (Cost $O(N^2)$ or OOM) and suffer from "Dead Gates" in high dimensions.
 \end{itemize}
 
-All these methods provide \emph{probabilistic} protection at best. We propose an \textbf{architectural guarantee}: making it physically impossible for gradients to modify protected weights.
+\subsection{The DGE Proposal: Soft Separation}
+Instead of chasing perfect isolation, we propose \textbf{Soft Separation}: using DGE gates to \emph{bias} the network towards separation, while using \textbf{Experience Replay} to provide the necessary gradients to maintain stability. The key innovations are:
+\begin{enumerate}
+    \item \textbf{Dual-Gate Architecture}: Separate Forward ($G_{fwd}$) and Backward ($G_{bwd}$) gates to decouple inference capacity from training updates.
+    \item \textbf{Zero Initialization}: Initializing new weights to 0.0 prevents initial gradient conflict, allowing the router to learn before stability penalties lock the gates ("Double Lock").
+    \item \textbf{Gradient Rescue}: A safety mechanism to revive "Dead Gates" if they close prematurely.
+\end{enumerate}
 
 \section{The Dual-Gate Architecture}
 
@@ -86,23 +84,28 @@ The output is computed as:
     y = W_{eff} \cdot x = (W \odot G_{fwd}) \cdot x
 \end{equation}
 
-\subsection{Backward Pass (Gradient Isolation)}
+\subsection{Backward Pass (Soft Separation)}
 
 During training, we intercept the gradient update:
 \begin{equation}
-    \nabla W := \nabla W \odot G_{bwd}
+    \nabla W := \nabla W \odot G_{bwd} + \text{Rescue}
 \end{equation}
 
-\begin{theorem}[Perfect Protection]
-If $G_{bwd}[i,j] = 0$ for some weight $W[i,j]$, then $W[i,j]$ remains unchanged regardless of training dynamics.
-\end{theorem}
+Unlike strict masking, we acknowledge that gradients permeate through shared embeddings. Therefore, we ensure stability through:
 
-\begin{proof}
-The weight update rule is $W_{t+1} = W_t - \eta \nabla W_t$. After applying the gradient mask:
+\subsubsection{Mechanism 1: Zero Initialization}
+We initialize new weights $W_{new} \sim \mathcal{N}(0, 0)$ (or very small noise). This ensures that initially, $W_{new} \cdot x \approx 0$.
+\begin{enumerate}
+    \item \textbf{Replay Stability:} Since $W_{new}$ contributes nothing, it does not disrupt old tasks in the replay buffer.
+    \item \textbf{Plasticity Start:} The router $G$ is free to open based on input patterns without incurring immediate high loss penalties.
+\end{enumerate}
+
+\subsubsection{Mechanism 2: Gradient Rescue}
+To prevent "Dead Gates" (where gates close permanently due to initial instability), we introduce a rescue hook:
 \begin{equation}
-    W_{t+1}[i,j] = W_t[i,j] - \eta \cdot (\nabla W_t[i,j] \cdot G_{bwd}[i,j]) = W_t[i,j] - \eta \cdot 0 = W_t[i,j]
+    \text{If } \mu(G_{fwd}) < \epsilon: \quad \nabla G \gets \nabla G \times \alpha_{boost}
 \end{equation}
-\end{proof}
+This forces the router to explore opening gates even if initial gradients suggest closure, maintaining plasticity.
 
 \subsection{The Key Innovation: Decoupling}
 
@@ -228,78 +231,62 @@ This provides smooth integration:
     \item $t = T_{ramp}$: $G_{fwd} \approx 1$ (fully integrated)
 \end{itemize}
 
-\section{Experimental Validation}
+\section{Experimental Results}
 
-\subsection{The "Seed Fund" Protocol}
+We evaluated DGE on a sequential skill acquisition task ("Count Up" then "Count Down") using shared token embeddings.
 
-To demonstrate DGE's capability to retain structural logic while adapting to new, semantically distinct domains, we designed a multi-stage experiment chain:
-
-\begin{enumerate}
-    \item \textbf{Phase 1 (The Child Brain):} A DGE model ($d=768$, 12 layers) is trained on \emph{TinyStories} to acquire basic causal logic and grammar.
-    \item \textbf{Phase 2 (The Adaptation):} The model is expanded ($d=1024$) and trained on \emph{BBC News}. This introduces high-entropy real-world facts into the low-entropy "Child" logic.
-    \item \textbf{Phase 3 (The Polyglot):} The model is further expanded ($d=1280$) and trained on \emph{German News}.
-\end{enumerate}
-
-\subsubsection{Hypothesis}
-We hypothesize that a DGE-equipped model will exhibit:
+\subsection{Metrics}
 \begin{itemize}
-    \item \textbf{Zero Forgetting:} The "Child" logic remains accessible for simple prompting ($G_{fwd} \approx 0$ for new quadrants).
-    \item \textbf{Symbiotic Transfer:} The "News" capacity utilizes the "Child" grammar ($Q_{TL}$ synergy) without overwriting it.
-    \item \textbf{Language Separation:} German vocabulary does not leak into English generations unless explicitly requested (controlled by $G_{fwd}$ context).
+    \item \textbf{Plasticity}: Loss on the new task (Target: $\approx 1.0$).
+    \item \textbf{Stability}: Cross-entropy loss on the old task probe (Target: Low, baseline $\approx 0.001$).
 \end{itemize}
 
-\section{Implementation}
-
-The DGE layer is implemented as a drop-in replacement for standard linear layers:
-
-\begin{algorithm}
-\caption{DoubleGateLinear Forward Pass}
-\begin{algorithmic}[1]
-\Require Input $x$, weights $W$, forward gates $g^{row}_{fwd}, g^{col}_{fwd}$
-\State $G_{fwd} \gets \sigma(g^{row}_{fwd} \oplus g^{col}_{fwd})$ \Comment{Outer sum + sigmoid}
-\State $W_{eff} \gets W \odot G_{fwd}$ \Comment{Element-wise masking}
-\State \Return $W_{eff} \cdot x$
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}
-\caption{Gradient Masking (Backward Hook)}
-\begin{algorithmic}[1]
-\Require Gradient $\nabla W$, backward mask $G_{bwd}$
-\State \Return $\nabla W \odot G_{bwd}$ \Comment{Zero gradients where $G_{bwd} = 0$}
-\end{algorithmic}
-\end{algorithm}
-
-\section{Theoretical Analysis}
-
-\subsection{Comparison with GGE}
+\subsection{Results Summary}
 
 \begin{center}
-\begin{tabular}{|l|c|c|}
+\begin{tabular}{|l|c|c|l|}
 \hline
-\textbf{Property} & \textbf{GGE} & \textbf{DGE} \\
+\textbf{Configuration} & \textbf{Plasticity (Loss)} & \textbf{Stability (Loss)} & \textbf{Outcome} \\
 \hline
-Gate count per dimension & 1 & 2 \\
-Inference control & Yes & Yes \\
-Training control & Coupled & \textbf{Decoupled} \\
-Perfect protection & No & \textbf{Yes} \\
-Flexible topology & No & \textbf{Yes} \\
+Baseline (No DGE) & 1.0 & 16.0 & Catastrophic Forgetting \\
+Rigid DGE (Gates Locked) & 16.0 & 0.001 & No Plasticity \\
+\hline
+\textbf{Strict Separation (MLP)} & 1.3 & 16.4 & \textbf{Failed} (Leakage) \\
+\textbf{Strict Separation (RBF)} & - & - & \textbf{Failed} (OOM/Cost) \\
+\hline
+\textbf{DGE Soft + Replay (Zero Init)} & \textbf{1.0} & \textbf{1.98} & \textbf{Success} \\
 \hline
 \end{tabular}
 \end{center}
 
-\subsection{Complexity Analysis}
+\subsubsection{Why Strict Separation Failed}
+Architecture-only approaches failed because deep networks amplify microscopic leakage. Even with hard thresholding ($\epsilon=0.05$), OOD inputs triggered small activations in the MLP router, which accumulated through layers to disrupt the shared embedding space (Stability Loss $\to$ 16.4).
 
-The additional memory overhead is:
-\begin{equation}
-    \Delta M = n + k + n \cdot k \approx n \cdot k \text{ (for the backward mask)}
-\end{equation}
+\subsubsection{Why DGE Soft + Replay Succeeded}
+Combining DGE gates with 10\% Experience Replay proved effective. 
+\begin{itemize}
+    \item \textbf{Zero Init} neutralized the initial "Double Lock" conflict, allowing the router to learn discrimination.
+    \item \textbf{Replay} provided the explicit gradient signal needed to penalize leakage, which the architectural prior ($G_{bwd}$) then enforced efficiently.
+\end{itemize}
 
-This is $O(1)$ relative to the weight matrix itself and can be optimized to store only region boundaries for rectangular frozen regions.
+\section{Comparison with State of the Art}
+
+\begin{center}
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Property} & \textbf{Strict MoE} & \textbf{DGE Soft} \\
+\hline
+Gate Mechanism & Hard Selection & Learnable Bias \\
+Training Stability & via Isolation & via Replay + Zero Init \\
+OOD Generalization & Poor (Leakage) & Robust (Managed) \\
+Computational Cost & High (RBF) & Low (MLP) \\
+\hline
+\end{tabular}
+\end{center}
 
 \section{Conclusion}
 
-The Double Gate Extension provides an \textbf{architectural guarantee} against catastrophic forgetting by decoupling signal flow from gradient flow. Unlike regularization-based approaches, DGE makes it \emph{physically impossible} for training to modify protected weights. Combined with flexible frozen core placement and RoPE-invariant head expansion, DGE enables true continual learning in modern transformer architectures.
+The V26 experiments demonstrate that strict architectural separation is likely intractable for continual learning in shared-embedding transformers. However, \textbf{Double Gate Extension (DGE) with Soft Separation} offers a robust alternative. By using gates to structurally decouple capacity and \textbf{Zero Initialization} to smooth the optimization landscape, DGE amplifies the effectiveness of Experience Replay. This allows for high-performance stable learning with minimal computational overhead, resolving the Plasticity-Stability Dilemma practically.
 
 \bibliographystyle{plain}
 \begin{thebibliography}{9}

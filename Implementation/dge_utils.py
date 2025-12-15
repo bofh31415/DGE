@@ -112,23 +112,181 @@ class Quadrant(Enum):
     BOTTOM_LEFT = "BL"
     BOTTOM_RIGHT = "BR"
 
+
+class RBFRouter(nn.Module):
+    """
+    Radial Basis Function Router.
+    Activates only when input is close to a learned centroid.
+    Gate = exp(-beta * ||x - mu||^2)
+    """
+    def __init__(self, input_dim: int, num_experts: int, beta_init=1.0):
+        super().__init__()
+        self.input_dim = input_dim
+        self.num_experts = num_experts
+        
+        # Centroids (mu)
+        self.centroids = nn.Parameter(torch.Tensor(num_experts, input_dim))
+        nn.init.normal_(self.centroids, mean=0.0, std=0.02) # Start near zero but distinct
+        
+        # Inverse Width (beta) - Using log parameterization to ensure positivity
+        self.log_beta = nn.Parameter(torch.ones(num_experts) * math.log(beta_init))
+        
+    @torch.no_grad()
+    def imprint_from_batch(self, x: torch.Tensor):
+        """
+        Initializes centroids by sampling from the input batch.
+        x: [Batch, Seq, Dim] or [Batch, Dim]
+        """
+        # Flatten batch and sequence dims
+        x_flat = x.reshape(-1, self.input_dim)
+        
+        # Select n_experts random indices
+        total_tokens = x_flat.size(0)
+        if total_tokens < self.num_experts:
+             # Fallback: Repeat data if not enough
+             indices = torch.randint(0, total_tokens, (self.num_experts,))
+        else:
+             # Random permutation
+             indices = torch.randperm(total_tokens)[:self.num_experts]
+             
+        selected = x_flat[indices] # [Experts, Dim]
+        self.centroids.data.copy_(selected)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [Batch, Input_Dim]
+        # centroids: [Experts, Input_Dim]
+        
+        # Calculate squared Euclidean distance: ||x - mu||^2
+        # (x - mu)^2 = x^2 + mu^2 - 2*x*mu
+        # More stable to use direct subtraction with broadcasting if memory allows.
+        # x: [..., 1, D]
+        # mu: [1, E, D]
+        
+        # Reshape for broadcasting
+        # x_expanded: [..., 1, D]
+        x_expanded = x.unsqueeze(-2) 
+        
+        # Distance: [..., Experts]
+        # Sum over last dim (Input_Dim)
+        dist_sq = (x_expanded - self.centroids).pow(2).sum(-1)
+        
+        # Beta must be positive
+        beta = torch.exp(self.log_beta)
+        
+        # Gate activation
+        # Avoid exploding gradients in exp
+        gates = torch.exp(-beta * dist_sq)
+        
+        return gates
+
+class BigramRouter(nn.Module):
+    """
+    Contextual Router (Bigram/Conv1D).
+    Input: [Batch, Seq, Dim]
+    Feeds MLP([x_t, x_{t-1}]) to determine gate activation.
+    Disambiguates tokens based on immediate history.
+    """
+    def __init__(self, input_dim: int, num_experts: int, hidden_dim=None, router_init_bias=-4.0):
+        super().__init__()
+        self.input_dim = input_dim
+        concat_dim = input_dim * 2
+        
+        if hidden_dim is None:
+            hidden_dim = max(16, input_dim // 2)
+            
+        self.mlp = nn.Sequential(
+            nn.Linear(concat_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_experts)
+        )
+        
+        # Initialization
+        # Last layer bias controls initial openness
+        nn.init.constant_(self.mlp[-1].bias, router_init_bias)
+        # Weights near zero to minimize noise
+        nn.init.normal_(self.mlp[-1].weight, mean=0.0, std=0.001)
+        
+        # First layer
+        nn.init.kaiming_normal_(self.mlp[0].weight, mode='fan_in', nonlinearity='relu')
+        nn.init.constant_(self.mlp[0].bias, 0.0)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [Batch, Seq, Dim]
+        # We assume 3D input [B, T, D].
+        if x.dim() != 3:
+            # Fallback for non-sequential input (e.g. flattened) -> No Context
+            # Just separate logic or error?
+            # For robustness, we'll treat prev as zeros.
+            prev = torch.zeros_like(x)
+        else:
+            # Shift right along sequence dim (1)
+            # x: [B, T, D]
+            prev = torch.roll(x, shifts=1, dims=1)
+            prev[:, 0, :] = 0.0 # Zero out the first token's context (it has no prev)
+            
+        combined = torch.cat([x, prev], dim=-1) # [B, T, 2*D]
+        return self.mlp(combined)
+
+class RBFBigramRouter(RBFRouter):
+    """
+    Combines RBF Selectivity with Bigram Context.
+    Input: [Batch, Seq, Dim]
+    Internally constructs [x_t, x_{t-1}] and computes RBF distance in 2*Dim space.
+    """
+    def __init__(self, input_dim: int, num_experts: int, beta_init=1.0):
+        # We pass 2*input_dim to the parent RBFRouter
+        super().__init__(input_dim * 2, num_experts, beta_init=beta_init)
+        self.original_input_dim = input_dim
+
+    def _make_bigram(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() != 3:
+            prev = torch.zeros_like(x)
+        else:
+            prev = torch.roll(x, shifts=1, dims=1)
+            prev[:, 0, :] = 0.0
+        return torch.cat([x, prev], dim=-1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        bigram_x = self._make_bigram(x)
+        return super().forward(bigram_x)
+
+    @torch.no_grad()
+    def imprint_from_batch(self, x: torch.Tensor):
+        bigram_x = self._make_bigram(x)
+        # RBFRouter.imprint_from_batch handles flattening and sampling
+        super().imprint_from_batch(bigram_x)
+
 class HybridGate(nn.Module):
     """
     A Gate that is Static (Always Open) for old indices and Dynamic (MoE) for new indices.
     """
-    def __init__(self, input_dim: int, old_count: int, new_count: int, router_type='linear'):
+    def __init__(self, input_dim: int, old_count: int, new_count: int, router_type='linear', router_init_bias=-4.0, gating_threshold: float = 0.0):
         super().__init__()
         self.old_count = old_count
         self.new_count = new_count
         self.router_type = router_type
+        self.gating_threshold = gating_threshold
+        self.router_type = router_type
+        self.gating_threshold = gating_threshold
         self.last_mean_open = 1.0 # Default to 1.0 to avoid zero div
+        self.rescue_strength = 10000.0 # V4/V6 Fix: Default to high strength
+        self.use_gradient_rescue = False # Default Off, enabled by expand logic
         
         # Static Old Segment (Buffer to freeze it)
         self.register_buffer('old_gate', torch.ones(old_count))
         
         # Dynamic New Segment (Router)
         if new_count > 0:
-            if router_type == 'mlp':
+            if router_type == 'rbf':
+                # V21: RBF Router for Localized Selectivity
+                self.router = RBFRouter(input_dim, new_count, beta_init=1.0)
+            elif router_type == 'rbf_bigram':
+                # V23: RBF Bigram Router (Context + Selectivity)
+                self.router = RBFBigramRouter(input_dim, new_count, beta_init=1.0)
+            elif router_type == 'bigram':
+                # V22: Bigram Contextual Router
+                self.router = BigramRouter(input_dim, new_count, router_init_bias=router_init_bias)
+            elif router_type == 'mlp':
                 # V 0.3.0: MLP Router for Non-Linear Separation
                 hidden_dim = max(16, input_dim // 4)
                 self.router = nn.Sequential(
@@ -136,17 +294,21 @@ class HybridGate(nn.Module):
                     nn.ReLU(),
                     nn.Linear(hidden_dim, new_count)
                 )
-                # Init last layer to Closed
-                nn.init.constant_(self.router[-1].bias, -4.0)
-                nn.init.kaiming_uniform_(self.router[-1].weight, a=math.sqrt(5))
+                # Init last layer to Closed (Tunable)
+                nn.init.constant_(self.router[-1].bias, router_init_bias)
+                # V5: Zero Init (Small Noise) to guarantee gates start closed
+                nn.init.normal_(self.router[-1].weight, mean=0.0, std=0.001)
+                
+                # Also dampen the first layer to prevent massive activations
+                nn.init.normal_(self.router[0].weight, mean=0.0, std=0.01)
+                nn.init.constant_(self.router[0].bias, 0.0)
             else:
                 # Default Linear Router
                 self.router = nn.Linear(input_dim, new_count)
-                # Initialize to Closed (-4.0 bias -> ~1.8% open)
-                # V 0.2.7: Reverted to Closed to protect Skill A.
-                # Gradient flow is now guaranteed by Non-Zero W initialization (see expand_dge_linear).
-                nn.init.constant_(self.router.bias, -4.0)
-                nn.init.kaiming_uniform_(self.router.weight, a=math.sqrt(5))
+                # Initialize to Closed (Tunable)
+                nn.init.constant_(self.router.bias, router_init_bias)
+                # V5: Zero Init (Small Noise)
+                nn.init.normal_(self.router.weight, mean=0.0, std=0.001)
         else:
             self.router = None
             
@@ -165,11 +327,66 @@ class HybridGate(nn.Module):
         old_part = self.old_gate.expand(*batch_dims, -1)
         
         if self.new_count > 0:
-            router_logits = self.router(x)
-            new_part = torch.sigmoid(router_logits)
+            router_out = self.router(x)
+            if self.router_type in ['rbf', 'rbf_bigram']:
+                new_part = router_out
+            else:
+                new_part = torch.sigmoid(router_out)
             
-            # Store mean activation for Sparsity Loss
-            self.last_mean_open = new_part.mean() 
+            # V24: Strict Separation (Hard Thresholding with STE)
+            if self.gating_threshold > 0.0:
+                mask = (new_part >= self.gating_threshold).to(new_part.dtype)
+                new_part = (new_part * mask) - new_part.detach() + new_part
+
+            # V6: Parallel Detached Rescue
+            # Problem: V4 TensorHook exploded Input Gradients. V5 ParamHook died on Zero Gradients.
+            # Solution: Run Router TWICE.
+            # Path 1: new_part = Router(x). Gradients -> x and W. (Normal)
+            # Path 2: rescue_part = Router(x.detach()). Gradients -> W only. (Boosted)
+            
+            # Clean up V5 state if it exists (for reload safety)
+            if hasattr(self, '_rescue_handles'):
+                for h in self._rescue_handles: h.remove()
+                self._rescue_handles.clear()
+            
+            self.last_rescue_scale = 0.0
+
+            if getattr(self, 'use_gradient_rescue', False) and new_part.mean() < 0.01 and self.training:
+                # Only apply if actually needed (closed gates) and training
+                # RBF or Sigmoid output is in 'new_part' (Path 1)
+                
+                # Path 2: Detached Input
+                # We need to re-run the router logic.
+                # Note: This doubles the compute for the router, but router is cheap (small MLP/RBF).
+                rescue_part = self.router(x.detach())
+                if self.router_type not in ['rbf', 'rbf_bigram']:
+                     rescue_part = torch.sigmoid(rescue_part)
+                
+                # Apply STE threshold if needed (to match Path 1 logic exactly)
+                if self.gating_threshold > 0.0:
+                    r_mask = (rescue_part >= self.gating_threshold).to(rescue_part.dtype)
+                    rescue_part = (rescue_part * r_mask) - rescue_part.detach() + rescue_part
+
+                strength = self.rescue_strength
+                self.last_rescue_scale = strength
+
+                # Register Hook on Path 2 Output
+                def rescue_hook(grad):
+                    return grad * strength
+                
+                if rescue_part.requires_grad:
+                    rescue_part.register_hook(rescue_hook)
+                    
+                    # Merge Paths
+                    # y = y1 + y2 - y2.detach()
+                    # Value: y1 + 0 = y1.
+                    # Backward: dL/dy * dy/dy1 + dL/dy * dy/dy2.
+                    # dy/dy1 = 1. -> Gradient flows to x and W (Path 1).
+                    # dy/dy2 = 1. -> Gradient * 10000 flows to W only (Path 2 input is detached).
+                    # Result: Weights get 10001x gradient. Inputs get 1x gradient.
+                    new_part = new_part + rescue_part - rescue_part.detach()
+
+            self.last_mean_open = new_part.mean().detach()
             
             return torch.cat([old_part, new_part], dim=-1)
         else:
@@ -180,7 +397,7 @@ class MoEGatedLinear(nn.Module):
     """
     V 0.2.0: Mixture-of-Experts Gated Linear Layer.
     """
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, router_type='linear'):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, router_type='linear', router_init_bias=-4.0, gating_threshold: float = 0.0):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -189,7 +406,7 @@ class MoEGatedLinear(nn.Module):
         self.router_type = router_type 
         self.use_gradient_rescue = False
         self.use_gradient_rescue = False
-        self.rescue_strength = 10000.0 # Factor to boost gradient when gate is closed. Needs to be high (e.g. 3000x for double-sigmoid)
+        self.rescue_strength = 10000.0 # V8.1: Boosted for Double-Lock (Need > 3000x)
         
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
         if bias:
@@ -197,8 +414,9 @@ class MoEGatedLinear(nn.Module):
         else:
             self.register_parameter('bias', None)
             
-        self.gate_row = None 
-        self.gate_col = None 
+        # V 0.2.0: Split Gate (Hybrid)
+        self.gate_row = HybridGate(in_features, out_features, 0, router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
+        self.gate_col = HybridGate(in_features, in_features, 0, router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
         
         self.register_buffer('active_mask', torch.ones(out_features, in_features))
         self.register_buffer('frozen_bias_mask', torch.ones(out_features))
@@ -238,10 +456,13 @@ def expand_dge_linear(
     added_out: int, 
     frozen_core_pos: Quadrant = Quadrant.TOP_LEFT,
     isolate_cross_terms: bool = False,
+    cross_term_policy: str = 'full', # 'full', 'block_diagonal', 'imprint'
 
     router_type='linear',
-    use_gradient_rescue: bool = False,
-    use_orthogonal_init: bool = False
+    use_gradient_rescue: bool = True, # ADOPTED: V26 Strategy (Default On)
+    use_orthogonal_init: bool = False, # ADOPTED: V26 Strategy (Default Zero Init for Safe Replay)
+    router_init_bias: float = 0.0, # DIRECTED SYNERGY: Start Open (Life Support)
+    gating_threshold: float = 0.0
 ) -> MoEGatedLinear:
     """
     Expands a DoubleGateLinear layer by adding input and/or output dimensions.
@@ -249,15 +470,23 @@ def expand_dge_linear(
     
     Args:
         ...
-        isolate_cross_terms: If True, freezes the cross-quadrants (BL/TR) to 0.0,
-                             enforcing strict block-diagonal separation.
+        cross_term_policy: 'full' (all active), 'block_diagonal' (all cross frozen),
+                           'imprint' (Old->New active, New->Old frozen).
+        isolate_cross_terms: Legacy, if True, overrides policy to 'block_diagonal'.
     """
+    # Map Legacy
+    # DIRECTED SYNERGY PHASE 1: FORCE ENABLE CROSS TERMS (Old->New)
+    # We explicitly IGNORE isolate_cross_terms=True to prevent Dead Sidecar.
+    if isolate_cross_terms:
+        # cross_term_policy = 'block_diagonal' # OLD
+        pass # NEW: Ignore isolation request. Keep 'full' or whatever was passed.
+        isolate_cross_terms = False # Force False for downstream logic
     old_out, old_in = layer.weight.shape
     new_in = old_in + added_in
     new_out = old_out + added_out
     
     # 2. Create New Layer
-    new_layer = MoEGatedLinear(new_in, new_out, bias=(layer.bias is not None), router_type=router_type)
+    new_layer = MoEGatedLinear(new_in, new_out, bias=(layer.bias is not None), router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
     new_layer.use_gradient_rescue = use_gradient_rescue
     
     # Defaults for initialization of new areas
@@ -278,11 +507,11 @@ def expand_dge_linear(
     # Note: reset_parameters() already sets mask to 1s. We just need to zero out the old core.
     
     # CRITICAL FIX for Identity Preservation:
-    # Initialize ALL weights to 0.0 first.
-    # This ensures that even if gates are partially open (due to cross-terms),
-    # the new connections contribute nothing initially.
-    # This is standard "Zero-Init" practice for growing networks.
-    nn.init.constant_(new_layer.weight, 0.0)
+    # Initialize ALL weights to Epsilon Noise first.
+    # While Zero Init (0.0) is ideal for stability, it KILLS gradients for the Gate.
+    # d(Gate)/d(Loss) depends on Weight. If Weight=0, d(Gate)=0. Rescue fails.
+    # We use std=0.02 to provide a "Gradient Wick" while keeping output ~0.0004.
+    nn.init.normal_(new_layer.weight, mean=0.0, std=0.02)
     
     # Helper indices for the "Old" block in the new matrix
     if frozen_core_pos == Quadrant.TOP_LEFT:
@@ -344,9 +573,17 @@ def expand_dge_linear(
             # Standard Noise Init (V 0.2.7)
             # We need Non-Zero weights to allow gradient flow to the Gate.
             # dL/dGate = dL/dOut * Weight. If Weight=0, Gate cannot learn.
-            # With Gate=-4.0 (0.018), and Weight=1e-3, effective noise is 1e-5. Identity Safe.
-            nn.init.normal_(new_layer.weight[old_out:, :], mean=0.0, std=0.001)
-            nn.init.normal_(new_layer.weight[:, old_in:], mean=0.0, std=0.001)
+            # With Gate=-4.0 (0.018), and Weight=0.02, effective noise is 3.6e-4. Identity Safe.
+            
+            # --- PHASE 3: THE FIREWALL (Asymmetric Init) ---
+            # 1. Q_BL (New->New) & Q_BR (Old->New): Noise Init (Capacity & Synergy)
+            nn.init.normal_(new_layer.weight[old_out:, :], mean=0.0, std=0.02)
+            
+            # 2. Q_TR (New->Old): ZERO INIT (Firewall)
+            # This is the "Leak Path" where new inputs corrupt old outputs.
+            # We enforce exact zeros here. The gate can open, but it transmits silence.
+            # Identity is preserved: Y_old = W_old * X_old + Gate * 0.0 * X_new = Y_old.
+            new_layer.weight[:old_out, old_in:].zero_()
         
         # Clean up bias for new rows
         if layer.bias is not None:
@@ -376,24 +613,63 @@ def expand_dge_linear(
     # Usually Router sees the ful input `x`. So `new_in`.
     
     # Gate Col (Inputs)
-    new_layer.gate_col = HybridGate(input_dim=new_in, old_count=old_in, new_count=added_in, router_type=router_type)
+    new_layer.gate_col = HybridGate(input_dim=new_in, old_count=old_in, new_count=added_in, router_type=router_type, router_init_bias=router_init_bias)
+    new_layer.gate_col.use_gradient_rescue = use_gradient_rescue
+    new_layer.gate_col.rescue_strength = 10000.0 if use_gradient_rescue else 1.0
     
     # Gate Row (Outputs)
-    new_layer.gate_row = HybridGate(input_dim=new_in, old_count=old_out, new_count=added_out, router_type=router_type)
+    new_layer.gate_row = HybridGate(input_dim=new_in, old_count=old_out, new_count=added_out, router_type=router_type, router_init_bias=router_init_bias)
+    new_layer.gate_row.use_gradient_rescue = use_gradient_rescue
+    new_layer.gate_row.rescue_strength = 10000.0 if use_gradient_rescue else 1.0
     
     # 5. Gradient Masking (Backward Hook)
     # 1 = Update, 0 = Freeze.
     mask = torch.ones(new_out, new_in)
     mask[:old_out, :old_in] = 0.0 # Freeze Old Core
     
+    # --- PHASE 3: THE FIREWALL (Hard Freeze) ---
+    # We strictly FREEZE the New->Old quadrant to prevent Leakage Creep.
+    # Without Replay, any plasticity here destroys Old Task performance.
+    # Q_TL (New In -> Old Out) = FROZEN.
+    mask[:old_out, old_in:] = 0.0
+    
     # Isolate Cross Terms (Sidecar Mode)
-    if isolate_cross_terms:
+    # 5. Gradient Masking (Backward Hook)
+    # 1 = Update, 0 = Freeze.
+    mask = torch.ones(new_out, new_in)
+    mask[:old_out, :old_in] = 0.0 # Freeze Old Core
+    
+    # Isolate Cross Terms (Sidecar Mode)
+    if cross_term_policy == 'block_diagonal':
         # Cross Terms: Old->New and New->Old
         # We freeze them at 0.0 (Mask = 0).
-        # Top-Right (Old In -> New Out)
-        mask[old_out:, :old_in] = 0.0 
-        # Bottom-Left (New In -> Old Out)
+        # Top-Right (Old In -> New Out) -> Wait, logic below is [Old_Out, Old_In:] (Top Right)
+        mask[:old_out, old_in:] = 0.0 
+        # Bottom-Left (New In -> Old Out) -> Wait, [Old_Out:, :Old_In] (Bottom Left)
+        mask[old_out:, :old_in] = 0.0
+        
+        # CRITICAL FIX V10: Zero out values
+        with torch.no_grad():
+            new_layer.weight[:old_out, old_in:] = 0.0 
+            new_layer.weight[old_out:, :old_in] = 0.0 
+            
+    elif cross_term_policy == 'imprint':
+        # V20: Asymmetric Imprinting
+        # We want New Neurons to read Old Features (Old->New). So Bottom-Left is ACTIVE.
+        # We want Old Neurons to be protected from New Noise (New->Old). So Top-Right is FROZEN.
+        
+        # Top-Right (New Input -> Old Output): Freeze to 0.0 to preserve Identity of Old Output.
         mask[:old_out, old_in:] = 0.0
+        with torch.no_grad():
+            new_layer.weight[:old_out, old_in:] = 0.0
+            
+        # Bottom-Left (Old Input -> New Output): Leave Active (1.0). 
+        # Weights are initialized to 0.0 or Noise (from Section 3).
+        # Section 3 inited [:, :old_in] (Left columns) as Copy Top-Left, Noise Bottom-Left.
+        # So Bottom-Left has noise (1e-3). 
+        # Mask is 1.0. Gradients will flow from New Output back to Old Input.
+        pass
+
         
     new_layer.register_buffer('backward_mask', mask)
     
@@ -585,13 +861,14 @@ def expand_embedding(embedding, added_dim):
     # Register purely for persistence if we wanted to save it, but hook needs it in closure or attribute
     new_emb.register_buffer('frozen_mask', frozen_mask)
     
+    # CRITICAL FIX V15: Hook the gradients to enforce the mask!
     def hook_fn(grad):
-        if grad is None: return None
-        # Grad shape: [vocab, dim] OR Sparse indices? 
-        # nn.Embedding usually returns dense grad if sparse=False (default).
-        # We need to broadcast the mask [dim] to [vocab, dim]
-        # grad * (1 - mask)
-        return grad * (1.0 - frozen_mask.to(grad.device))
+        # frozen_mask is [new_dim]
+        # grad is [vocab, new_dim] typically
+        if grad.dim() > 1:
+             return grad * (1.0 - frozen_mask.view(1, -1).to(grad.device))
+        else:
+             return grad * (1.0 - frozen_mask.to(grad.device))
         
     new_emb.weight.register_hook(hook_fn)
     
@@ -612,9 +889,6 @@ def expand_parameter(param, added_dim):
     new_data = torch.zeros(shape, device=param.device)
     
     # Copy old
-    # Slice dynamically
-    # Assuming 3D for PosEmb [1, T, D] or generic?
-    # Let's trust standard slicing works for last dim if we use ...
     with torch.no_grad():
         new_data[..., :old_dim] = old_data
         # New parts random noise
@@ -627,13 +901,10 @@ def expand_parameter(param, added_dim):
     frozen_mask[:old_dim] = 1.0
     
     # Can't register buffer on Parameter, only on Module.
-    # But we can capture 'frozen_mask' in the closure of the hook.
-    # We should move mask to device of grad inside hook.
+    # We capture mask in closure.
     def hook_fn(grad):
-        if grad is None: return None
-        # Grad has same shape as param [..., new_dim]
-        # Mask is [new_dim]
-        # Broadcast matches last dim automatically in PyTorch
+        # Broadcast mask to match gradient shape
+        # Mask [new_dim]. Grad [..., new_dim].
         return grad * (1.0 - frozen_mask.to(grad.device))
         
     new_param.register_hook(hook_fn)
@@ -683,3 +954,13 @@ def expand_linear_and_freeze_old(layer: nn.Linear, added_in: int) -> nn.Linear:
     new_layer.weight.register_hook(hook)
     
     return new_layer
+    
+    return new_layer
+
+def set_seed(seed: int):
+    """
+    Sets the seed for reproducibility.
+    """
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
