@@ -58,8 +58,62 @@ def list_local_datasets():
     return datasets
 
 
+def get_dataset_configs(dataset_name):
+    """
+    Get available configs for a HuggingFace dataset.
+    
+    Args:
+        dataset_name: HuggingFace dataset name.
+        
+    Returns:
+        List of config names, or empty list if no configs needed.
+    """
+    if not HF_AVAILABLE:
+        return []
+    
+    try:
+        from datasets import get_dataset_config_names
+        configs = get_dataset_config_names(dataset_name)
+        return configs if configs else []
+    except Exception:
+        return []
+
+
+def get_dataset_splits(dataset_name, config_name=None):
+    """
+    Get available splits for a HuggingFace dataset.
+    
+    Args:
+        dataset_name: HuggingFace dataset name.
+        config_name: Optional config name for multi-config datasets.
+        
+    Returns:
+        List of split names (e.g., ['train', 'test', 'validation']).
+    """
+    if not HF_AVAILABLE:
+        return ['train']
+    
+    try:
+        from datasets import get_dataset_split_names
+        if config_name:
+            splits = get_dataset_split_names(dataset_name, config_name)
+        else:
+            # Try without config first
+            configs = get_dataset_configs(dataset_name)
+            if len(configs) == 1:
+                splits = get_dataset_split_names(dataset_name, configs[0])
+            elif len(configs) > 1:
+                # Can't get splits without knowing config
+                return ['train', 'test']  # Default assumption
+            else:
+                splits = get_dataset_split_names(dataset_name)
+        return splits if splits else ['train']
+    except Exception:
+        return ['train']
+
+
 def download_hf_dataset(dataset_name, split='train', max_samples=None, text_field='text',
-                        local_name=None, force_download=False):
+                        local_name=None, force_download=False, config_name=None):
     """
     Download a HuggingFace dataset and store it locally.
     
@@ -70,18 +124,27 @@ def download_hf_dataset(dataset_name, split='train', max_samples=None, text_fiel
         text_field: Name of the text field in the dataset.
         local_name: Local name for the dataset (defaults to dataset_name).
         force_download: If True, re-download even if exists.
+        config_name: Config/subset name for multi-config datasets.
         
     Returns:
-        Path to local dataset directory.
+        Path to local dataset directory, or None if config selection needed.
     """
     if not HF_AVAILABLE:
         raise ImportError("HuggingFace datasets required. Run: pip install datasets")
     
     ensure_data_store()
     
+    # Check for multi-config datasets
+    configs = get_dataset_configs(dataset_name)
+    if len(configs) > 1 and config_name is None:
+        # Return configs list so caller can prompt user
+        raise ValueError(f"CONFIG_NEEDED:{','.join(configs)}")
+    
     # Determine local name
     if local_name is None:
         local_name = dataset_name.replace('/', '_')
+        if config_name:
+            local_name += f"_{config_name}"
     
     local_path = os.path.join(DATA_STORE_PATH, local_name)
     
@@ -91,25 +154,68 @@ def download_hf_dataset(dataset_name, split='train', max_samples=None, text_fiel
         print(f"   Use force_download=True to re-download.")
         return local_path
     
-    print(f"⬇️ Downloading {dataset_name} ({split})...")
-    dataset = load_dataset(dataset_name, split=split)
+    print(f"⬇️ Downloading {dataset_name}" + (f" ({config_name})" if config_name else "") + f" [{split}]...")
+    
+    # Load with or without config
+    if config_name:
+        dataset = load_dataset(dataset_name, config_name, split=split)
+    elif len(configs) == 1:
+        dataset = load_dataset(dataset_name, configs[0], split=split)
+    else:
+        dataset = load_dataset(dataset_name, split=split)
     
     if max_samples:
         dataset = dataset.select(range(min(max_samples, len(dataset))))
     
-    # Extract texts
+    # Extract texts - try multiple strategies
     texts = []
-    for item in dataset:
-        if isinstance(item, dict) and text_field in item:
-            texts.append(item[text_field])
-        elif isinstance(item, str):
-            texts.append(item)
+    # Common text fields in order of preference
+    common_fields = ['text', 'story', 'content', 'article', 'question', 'input', 
+                     'sentence', 'passage', 'document', 'prompt']
+    
+    # If user specified a field, prioritize it
+    if text_field and text_field != 'text':
+        common_fields = [text_field] + [f for f in common_fields if f != text_field]
+    
+    # Get sample item to detect available fields
+    sample_item = dataset[0] if len(dataset) > 0 else {}
+    available_fields = list(sample_item.keys()) if isinstance(sample_item, dict) else []
+    
+    # Find the best text field
+    text_field_used = None
+    for field in common_fields:
+        if field in available_fields:
+            text_field_used = field
+            break
+    
+    # If no common field found, use first string-like field or combine Q&A
+    if text_field_used is None:
+        # Check for Q&A format
+        if 'question' in available_fields and 'answer' in available_fields:
+            print(f"📝 Detected Q&A format, combining question + answer")
+            for item in dataset:
+                combined = f"Question: {item.get('question', '')}\nAnswer: {item.get('answer', '')}"
+                texts.append(combined)
         else:
-            # Try common field names
-            for field in ['text', 'story', 'content', 'article']:
-                if field in item:
-                    texts.append(item[field])
+            # Use first available string field
+            for field in available_fields:
+                if isinstance(sample_item.get(field), str):
+                    text_field_used = field
+                    print(f"⚠️ Using fallback field: '{field}'")
                     break
+    
+    # Extract texts using the selected field
+    if text_field_used and len(texts) == 0:
+        print(f"📝 Using text field: '{text_field_used}'")
+        for item in dataset:
+            text_val = item.get(text_field_used, '')
+            if isinstance(text_val, str) and text_val.strip():
+                texts.append(text_val)
+    
+    # If still no texts, show available fields
+    if len(texts) == 0 and len(dataset) > 0:
+        print(f"⚠️ Could not extract text. Available fields: {available_fields}")
+        print(f"   Try re-downloading with text_field set to one of these.")
     
     # Save locally
     os.makedirs(local_path, exist_ok=True)

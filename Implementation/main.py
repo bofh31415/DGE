@@ -1206,22 +1206,126 @@ class DGELab:
                     print("❌ No dataset name provided.")
                     continue
                 
-                split = input("Split (default 'train'): ").strip() or 'train'
+                # First check for configs
+                config_name = None
+                from data import get_dataset_configs, get_dataset_splits
+                configs = get_dataset_configs(dataset_name)
+                if len(configs) > 1:
+                    print(f"\n📋 This dataset has {len(configs)} configs:")
+                    for i, cfg in enumerate(configs):
+                        print(f"   {i+1}. {cfg}")
+                    cfg_choice = input("Select config number: ").strip()
+                    try:
+                        cfg_idx = int(cfg_choice) - 1
+                        if 0 <= cfg_idx < len(configs):
+                            config_name = configs[cfg_idx]
+                        else:
+                            print("❌ Invalid selection.")
+                            continue
+                    except ValueError:
+                        print("❌ Invalid selection.")
+                        continue
+                elif len(configs) == 1:
+                    config_name = configs[0]
+                
+                # Now show available splits
+                splits = get_dataset_splits(dataset_name, config_name)
+                print(f"\n📊 Available splits: {', '.join(splits)}")
+                
+                # Offer auto-split or manual selection
+                if len(splits) == 1:
+                    print(f"⚠️ Only '{splits[0]}' split available.")
+                    auto_split = input("Auto-split into 80% train / 20% test? (y/n, default y): ").strip().lower()
+                    if auto_split != 'n':
+                        split = splits[0]
+                        do_auto_split = True
+                    else:
+                        split = splits[0]
+                        do_auto_split = False
+                else:
+                    do_auto_split = False
+                    split_input = input(f"Select split (default 'train'): ").strip() or 'train'
+                    if split_input in splits:
+                        split = split_input
+                    else:
+                        print(f"⚠️ '{split_input}' not found, using 'train'")
+                        split = 'train' if 'train' in splits else splits[0]
+                
                 max_samples_str = input("Max Samples (default 10000, 0=all): ").strip() or '10000'
                 max_samples = int(max_samples_str) if max_samples_str != '0' else None
                 text_field = input("Text Field (default 'text'): ").strip() or 'text'
                 local_name = input("Local Name (default auto): ").strip() or None
                 
                 try:
-                    path = download_hf_dataset(
-                        dataset_name=dataset_name,
-                        split=split,
-                        max_samples=max_samples,
-                        text_field=text_field,
-                        local_name=local_name,
-                        force_download=True
-                    )
-                    print(f"✅ Downloaded to: {path}")
+                    from data import download_hf_dataset
+                    
+                    if do_auto_split:
+                        # Download and auto-split 80/20
+                        print("📊 Downloading and auto-splitting 80/20...")
+                        base_name = local_name or dataset_name.replace('/', '_')
+                        if config_name:
+                            base_name += f"_{config_name}"
+                        
+                        path = download_hf_dataset(
+                            dataset_name=dataset_name,
+                            split=split,
+                            max_samples=max_samples,
+                            text_field=text_field,
+                            local_name=f"{base_name}_full",
+                            force_download=True,
+                            config_name=config_name
+                        )
+                        
+                        # Now split the downloaded data
+                        import json
+                        from data import DATA_STORE_PATH
+                        full_path = os.path.join(DATA_STORE_PATH, f"{base_name}_full", "texts.jsonl")
+                        
+                        if os.path.exists(full_path):
+                            with open(full_path, 'r', encoding='utf-8') as f:
+                                all_texts = [json.loads(line) for line in f]
+                            
+                            # Shuffle and split
+                            import random
+                            random.shuffle(all_texts)
+                            split_idx = int(len(all_texts) * 0.8)
+                            train_texts = all_texts[:split_idx]
+                            test_texts = all_texts[split_idx:]
+                            
+                            # Save train split
+                            train_dir = os.path.join(DATA_STORE_PATH, f"{base_name}_train")
+                            os.makedirs(train_dir, exist_ok=True)
+                            with open(os.path.join(train_dir, "texts.jsonl"), 'w', encoding='utf-8') as f:
+                                for t in train_texts:
+                                    f.write(json.dumps(t) + '\n')
+                            with open(os.path.join(train_dir, "metadata.json"), 'w') as f:
+                                json.dump({'type': 'auto_split', 'split': 'train', 'num_samples': len(train_texts), 'source': dataset_name}, f, indent=2)
+                            
+                            # Save test split
+                            test_dir = os.path.join(DATA_STORE_PATH, f"{base_name}_test")
+                            os.makedirs(test_dir, exist_ok=True)
+                            with open(os.path.join(test_dir, "texts.jsonl"), 'w', encoding='utf-8') as f:
+                                for t in test_texts:
+                                    f.write(json.dumps(t) + '\n')
+                            with open(os.path.join(test_dir, "metadata.json"), 'w') as f:
+                                json.dump({'type': 'auto_split', 'split': 'test', 'num_samples': len(test_texts), 'source': dataset_name}, f, indent=2)
+                            
+                            print(f"✅ Created {base_name}_train ({len(train_texts)} samples)")
+                            print(f"✅ Created {base_name}_test ({len(test_texts)} samples)")
+                        else:
+                            print(f"⚠️ Could not find downloaded data to split.")
+                    else:
+                        # Normal download
+                        path = download_hf_dataset(
+                            dataset_name=dataset_name,
+                            split=split,
+                            max_samples=max_samples,
+                            text_field=text_field,
+                            local_name=local_name,
+                            force_download=True,
+                            config_name=config_name
+                        )
+                        print(f"✅ Downloaded to: {path}")
                 except Exception as e:
                     print(f"❌ Download failed: {e}")
                     

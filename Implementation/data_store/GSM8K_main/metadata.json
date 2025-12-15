@@ -1,0 +1,7 @@
+{
+  "type": "huggingface",
+  "source": "GSM8K",
+  "split": "train",
+  "num_samples": 7473,
+  "text_field": "text"
+}
