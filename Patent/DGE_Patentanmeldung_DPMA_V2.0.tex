@@ -113,23 +113,23 @@ Durch diese Steuerung können "alte" und "neue" Datenverarbeitungsprozesse dense
 \begin{enumerate}
     \item \textbf{Computerimplementiertes Verfahren} zur ressourceneffizienten Verwaltung von Speicherzugriffen in einem adaptiven Signalverarbeitungssystem, umfassend:
     \begin{itemize}
-        \item Bereitstellen einer Speichermatrix mit einer Vielzahl von adressierbaren Zellen;
+        \item Bereitstellen einer adressierbaren Datenstruktur (z.B. Matrix, Tensor) zur Speicherung von Parametern;
         \item Empfangen eines sequenziellen Eingangsdatenstroms ($x_t$);
     \end{itemize}
     \textbf{gekennzeichnet durch folgende Schritte:}
     \begin{enumerate}[label=(\alph*)]
-        \item \textbf{Erzeugen eines Kontext-Steuersignals} durch logische Verknüpfung des aktuellen Eingangswerts ($x_t$) mit mindestens einem gepufferten vorangegangenen Wert ($x_{t-1}$), um den zeitlichen Kontext des Signals technisch zu charakterisieren;
-        \item \textbf{Dynamisches Routing} des Datenstroms auf Teilbereiche der Speichermatrix in Abhängigkeit von diesem Kontext-Steuersignal;
-        \item \textbf{Anwenden einer selektiven Schreibsperre} während einer Adaptionsphase, wobei in Abhängigkeit vom Kontext-Steuersignal der Schreibzugriff (Parameter-Update) auf definierte Speicheradressbereiche (z.B. Erweiterungsbereiche) physikalisch unterbunden wird, während der Lesezugriff für die Signalverarbeitung erhalten bleibt.
+        \item \textbf{Erzeugen eines Kontext-Steuersignals} durch Auswertung des aktuellen Eingangswerts ($x_t$) in Relation zu \textbf{mindestens einem} vorangegangenen oder parallelen Zustandswert (zeitlicher oder struktureller Kontext), um eine Signatur des aktuellen Verarbeitungsmodus zu generieren (Vermeidung der Beschränkung auf reine Bigramme);
+        \item \textbf{Dynamisches Routing} des Datenstroms auf definierte Segmente der Datenstruktur in Abhängigkeit von diesem Kontext-Steuersignal;
+        \item \textbf{Anwenden einer Modifikations-Restriktion} während einer Adaptionsphase, wobei in Abhängigkeit vom Kontext-Steuersignal die Änderung von Werten in definierten Speichersegmenten (z.B. Kernbereiche vs. Erweiterungsbereiche) \textbf{reduziert, skaliert oder vollständig blockiert} wird.
     \end{enumerate}
     
-    \item Verfahren nach Anspruch 1, \textbf{dadurch gekennzeichnet, dass} das Kontext-Steuersignal genutzt wird, um bei identischen Eingangswerten ($x_t$) in Abhängigkeit vom Vorwert ($x_{t-1}$) unterschiedliche Speichersegmente zu aktivieren, wodurch Datenkollisionen (Aliasing) in gemeinsam genutzten Speicherbereichen verhindert werden.
+    \item Verfahren nach Anspruch 1, \textbf{dadurch gekennzeichnet, dass} das Kontext-Steuersignal aus einem zeitlichen Fenster der Größe $N \ge 1$ (Historie) oder aus einem Aufmerksamkeitsmechanismus (Attention) abgeleitet wird, wodurch auch komplexe Sequenzabhängigkeiten zur Trennung von Betriebsmodi genutzt werden können.
     
-    \item Verfahren nach Anspruch 1 oder 2, \textbf{dadurch gekennzeichnet, dass} die selektive Schreibsperre durch eine binäre Maskierungsoperation im Rückkopplungspfad (Backpropagation) der Recheneinheit realisiert wird, welche die Berechnung von Änderungswerten für die geschützten Speicheradressen auf Null setzt.
+    \item Verfahren nach Anspruch 1 oder 2, \textbf{dadurch gekennzeichnet, dass} die Modifikations-Restriktion durch eine mathematische Operation im Rückkopplungspfad (z.B. Multiplikation mit einer Maske $M \in [0, 1]$) realisiert wird, wobei die Maskenwerte dynamisch oder statisch festgelegt sein können (Abdeckung von Soft-Freezing und Hard-Freezing).
     
-    \item Verfahren nach einem der vorstehenden Ansprüche, \textbf{dadurch gekennzeichnet, dass} neu allokierte Speicheradressen initial mit Neutralwerten (z.B. Null) belegt werden und das Routing-Modul initial in einen Durchlasszustand ("Open State") versetzt wird, um eine sofortige Nutzbarkeit der neuen Ressourcen ohne Initialisierungsrauschen zu gewährleisten.
+    \item Verfahren nach einem der vorstehenden Ansprüche, \textbf{dadurch gekennzeichnet, dass} neu allokierte Speichersegmente initial mit Werten belegt werden, deren Betrag unterhalb eines definierten Rausch-Schwellenwerts liegt (z.B. $\approx 0$ oder $\epsilon$-Umgebung), um eine Interferenzfreiheit bei der initialen Integration zu gewährleisten (Vermeidung der Beschränkung auf exakte Null).
     
-    \item \textbf{Signalverarbeitungsvorrichtung}, umfassend einen Prozessor und einen Speicher, eingerichtet zur Ausführung des Verfahrens nach einem der Ansprüche 1 bis 4, wobei die Vorrichtung insbesondere für den Einsatz in eingebetteten Systemen mit begrenzter Speicherkapazität konfiguriert ist.
+    \item \textbf{Signalverarbeitungsvorrichtung}, umfassend eine Recheneinheit und eine Speicherstruktur, konfiguriert zur Ausführung des Verfahrens nach einem der Ansprüche 1 bis 4, wobei die Vorrichtung insbesondere als Hardware-Beschleuniger (TPU, GPU, FPGA) oder eingebettetes System ausgeführt ist.
 \end{enumerate}
 
 \newpage
