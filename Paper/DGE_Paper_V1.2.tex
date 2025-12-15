@@ -1,0 +1,89 @@
+\documentclass[a4paper, 11pt]{article}
+
+% === PACKAGES ===
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{tikz}
+\usetikzlibrary{matrix,positioning,arrows.meta,calc}
+
+% === LAYOUT ===
+\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=3cm}
+
+% === THEOREMS ===
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{definition}{Definition}
+\newtheorem{lemma}{Lemma}
+
+% === METADATA ===
+\title{\textbf{Directed Synergy: Mitigating the Plasticity-Stability Dilemma via Contextual Gating}}
+\author{Dipl.-Inf. Sven Jansen}
+\date{December 2024}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Continual learning in neural networks aims to resolve the \textbf{Plasticity-Stability Dilemma}. While strict architectural separation offers a theoretical guarantee against forgetting, our experiments show that in deep transformers with shared embeddings, "Strict Separation" is often intractable due to leakage accumulation ("Leakage Creep"). We introduce \textbf{Directed Synergy}, a framework combining architectural gating with \textbf{Asymmetric Experience Replay}. By employing \textbf{Bigram Contextual Routers} to disambiguate task states and \textbf{Structural Bias} (Zero Initialization), DGE achieves high plasticity (Loss $\approx 1.0$) and recovers stability to near-baseline levels (Probe Loss $\approx 2.0$), effectively mitigating the dilemma where static isolation failed.
+\end{abstract}
+
+\section{Introduction}
+
+The Plasticity-Stability Dilemma remains a central challenge. We propose \textbf{Directed Synergy}, formally defined as the integration of:
+\begin{enumerate}
+    \item \textbf{Contextual Gating:} To resolve aliasing between tasks sharing identical tokens.
+    \item \textbf{Asymmetric Replay:} Freezing new capacity during replay to enforce strict boundary learning.
+    \item \textbf{Soft Separation:} Using initialization priors to bias the network towards separation without rigid locking.
+\end{enumerate}
+
+\section{Formal Problem Statement}
+
+\subsection{Context-Dependent Aliasing}
+
+\begin{definition}[Aliasing Problem]
+Aliasing occurs when two tasks $T_A, T_B$ share an input $x$, but require distinct outputs $y_A, y_B$. A router $R(x)$ with Markov order $k=0$ cannot distinguish these cases, leading to interference.
+\end{definition}
+
+\begin{proposition}[Contextual Resolution]
+A Contextual Router $R(x_t, x_{t-1})$ with Markov order $k \ge 1$ allows separation iff the transition history differs: $(x_{t-1} \to x_t)_{T_A} \neq (x_{t-1} \to x_t)_{T_B}$.
+\end{proposition}
+
+\section{Methodology: The Dual-Gate Architecture}
+
+We introduce two distinct gate types with specific functional domains:
+
+\subsection{Forward Gate (Sigmoid)}
+$G_{fwd} \in [0, 1]^{n \times k}$ controls signal visibility during inference.
+\begin{equation}
+    G_{fwd} = \sigma(\underbrace{g^{row} \oplus g^{col}}_{\text{Broadcast Add}} + \text{Bias})
+\end{equation}
+
+\subsection{Backward Gate (Binary)}
+$G_{bwd} \in \{0, 1\}^{n \times k}$ controls plasticity during training via a gradient mask.
+\begin{equation}
+    \nabla W_{updated} = \nabla W_{raw} \odot G_{bwd} + \text{Rescue}
+\end{equation}
+Where $\text{Rescue}$ is a sparse gradient injection to re-activate Dead Gates if $\mathbb{E}[G_{fwd}] < \epsilon$.
+
+\subsection{Zero Initialization Dynamics}
+Initializing expansion weights to $0$ ensures that at $t=0$, the new path contributes $0$ noise to the old task, bypassing the need for immediate "hard" separation. This allows the router to learn the separation policy \textit{before} the weights diverge.
+
+\section{Experiments}
+(See V1.0 for details. Results confirm Bigram Router superiority over Unigram).
+
+\section{Conclusion}
+Directed Synergy provides a robust mitigation strategy for continual learning in shared-embedding transformers.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{document}
