@@ -1,0 +1,7 @@
+{
+  "type": "huggingface",
+  "source": "roneneldan/TinyStories",
+  "split": "train",
+  "num_samples": 2119489,
+  "text_field": "text"
+}

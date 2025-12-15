@@ -1228,28 +1228,56 @@ class DGELab:
                 elif len(configs) == 1:
                     config_name = configs[0]
                 
-                # Now show available splits
+                # Now show available splits with sizes
                 splits = get_dataset_splits(dataset_name, config_name)
-                print(f"\n📊 Available splits: {', '.join(splits)}")
+                print(f"\n📊 Available splits:")
                 
-                # Offer auto-split or manual selection
+                # Try to get split sizes (may take a moment)
+                try:
+                    from datasets import load_dataset_builder
+                    if config_name:
+                        builder = load_dataset_builder(dataset_name, config_name)
+                    else:
+                        builder = load_dataset_builder(dataset_name)
+                    split_info = builder.info.splits
+                    for s in splits:
+                        if s in split_info:
+                            print(f"   • {s}: {split_info[s].num_examples:,} samples")
+                        else:
+                            print(f"   • {s}: (size unknown)")
+                except Exception:
+                    for s in splits:
+                        print(f"   • {s}")
+                
+                # Offer options: single split, all, or auto-split
                 if len(splits) == 1:
-                    print(f"⚠️ Only '{splits[0]}' split available.")
+                    print(f"\n⚠️ Only '{splits[0]}' split available.")
                     auto_split = input("Auto-split into 80% train / 20% test? (y/n, default y): ").strip().lower()
                     if auto_split != 'n':
-                        split = splits[0]
+                        selected_splits = [splits[0]]
                         do_auto_split = True
                     else:
-                        split = splits[0]
+                        selected_splits = [splits[0]]
                         do_auto_split = False
                 else:
                     do_auto_split = False
-                    split_input = input(f"Select split (default 'train'): ").strip() or 'train'
-                    if split_input in splits:
-                        split = split_input
+                    print(f"\nOptions: Enter split name, 'all' for all splits, or comma-separated list")
+                    split_input = input(f"Select split(s) (default 'train'): ").strip() or 'train'
+                    
+                    if split_input.lower() == 'all':
+                        selected_splits = splits
+                        print(f"📦 Will download all {len(splits)} splits")
+                    elif ',' in split_input:
+                        selected_splits = [s.strip() for s in split_input.split(',') if s.strip() in splits]
+                        if not selected_splits:
+                            print(f"⚠️ No valid splits found, using 'train'")
+                            selected_splits = ['train'] if 'train' in splits else [splits[0]]
                     else:
-                        print(f"⚠️ '{split_input}' not found, using 'train'")
-                        split = 'train' if 'train' in splits else splits[0]
+                        if split_input in splits:
+                            selected_splits = [split_input]
+                        else:
+                            print(f"⚠️ '{split_input}' not found, using 'train'")
+                            selected_splits = ['train'] if 'train' in splits else [splits[0]]
                 
                 max_samples_str = input("Max Samples (default 10000, 0=all): ").strip() or '10000'
                 max_samples = int(max_samples_str) if max_samples_str != '0' else None
@@ -1268,7 +1296,7 @@ class DGELab:
                         
                         path = download_hf_dataset(
                             dataset_name=dataset_name,
-                            split=split,
+                            split=selected_splits[0],
                             max_samples=max_samples,
                             text_field=text_field,
                             local_name=f"{base_name}_full",
@@ -1315,17 +1343,32 @@ class DGELab:
                         else:
                             print(f"⚠️ Could not find downloaded data to split.")
                     else:
-                        # Normal download
-                        path = download_hf_dataset(
-                            dataset_name=dataset_name,
-                            split=split,
-                            max_samples=max_samples,
-                            text_field=text_field,
-                            local_name=local_name,
-                            force_download=True,
-                            config_name=config_name
-                        )
-                        print(f"✅ Downloaded to: {path}")
+                        # Normal download - loop through selected splits
+                        base_name = local_name or dataset_name.replace('/', '_')
+                        if config_name:
+                            base_name += f"_{config_name}"
+                        
+                        for split in selected_splits:
+                            # Add split name to local name if downloading multiple
+                            if len(selected_splits) > 1:
+                                split_local_name = f"{base_name}_{split}"
+                            else:
+                                split_local_name = local_name  # User's choice or auto
+                            
+                            print(f"\n⬇️ Downloading split: {split}...")
+                            path = download_hf_dataset(
+                                dataset_name=dataset_name,
+                                split=split,
+                                max_samples=max_samples,
+                                text_field=text_field,
+                                local_name=split_local_name,
+                                force_download=True,
+                                config_name=config_name
+                            )
+                            print(f"✅ Downloaded to: {path}")
+                        
+                        if len(selected_splits) > 1:
+                            print(f"\n📦 Downloaded {len(selected_splits)} splits successfully!")
                 except Exception as e:
                     print(f"❌ Download failed: {e}")
                     
