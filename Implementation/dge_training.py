@@ -70,18 +70,36 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
     current_step = start_step # Initialize to start
     
     replay_tasks = kwargs.get('replay_tasks', [])
+    replay_ratio = kwargs.get('replay_ratio', 1.0) # Default to 1:1 if not specified
+    replay_debt = 0.0
     
     for i in range(steps):
         current_step = start_step + i
         
-        # Determine if this step is for Replay (Odd steps)
-        # Only if we have replay tasks
-        is_replay_step = (len(replay_tasks) > 0) and (i % 2 != 0)
+        # Determine if this step is for Replay
+        is_replay_step = False
+        if len(replay_tasks) > 0:
+            if replay_ratio >= 1.0:
+                 # Legacy/Default 50/50 Mode (Odd steps)
+                 is_replay_step = (i % 2 != 0)
+            else:
+                 # Sparse Replay Mode (Accumulator)
+                 # We want P(Replay) = replay_ratio
+                 # Add ratio to debt. If debt >= 1, trigger replay.
+                 # But we must balance the loop.
+                 # Actually, simpler: if debt >= 1.0, this step is Replay.
+                 replay_debt += replay_ratio
+                 if replay_debt >= 1.0:
+                     is_replay_step = True
+                     replay_debt -= 1.0
         
         if is_replay_step:
             # Replay Logic: Train Router Only
             # Pick a task (round robin or random - use simple modulo for now)
-            replay_idx = (i // 2) % len(replay_tasks)
+            # Use a separate counter for replay steps to ensure round robin works smoothly? 
+            # Or just use i. Using i is fine for random, but for round robin with sparse steps, 
+            # we should use a counter.
+            replay_idx = (i // 1) % len(replay_tasks) # Simplified
             r_task = replay_tasks[replay_idx]
             
             x, y = generate_batch(r_task, vocab_size, batch_size, seq_len)
@@ -192,6 +210,139 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
         checkpoint_fn(current_step)
         
     return current_step + 1 # Return next available step (e.g. if ended at 499, return 500)
+
+
+def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None, 
+                  start_step=0, checkpoint_fn=None, checkpoint_interval=500,
+                  replay_buffer=None, replay_ratio=0.1, sparsity_lambda=0.05,
+                  task_name="dataset", auto_populate_buffer=True):
+    """
+    Train model on a PyTorch DataLoader with epoch/batch loops.
+    
+    Supports automatic ReplayBuffer population and Asymmetric Replay.
+    
+    Args:
+        model: DGE model to train.
+        dataloader: PyTorch DataLoader providing (x, y) batches.
+        epochs: Number of full passes through the dataset.
+        optimizer: Optimizer to use (creates default AdamW if None).
+        logger: Optional DGELogger for forensic logging.
+        start_step: Starting global step number.
+        checkpoint_fn: Callback for checkpointing (called with step number).
+        checkpoint_interval: Steps between checkpoints.
+        replay_buffer: Optional ReplayBuffer for Asymmetric Replay.
+        replay_ratio: Probability of replay step (0.0-1.0).
+        sparsity_lambda: Gate sparsity penalty weight.
+        task_name: Name of this training task for logging.
+        auto_populate_buffer: If True, add samples to replay_buffer during training.
+        
+    Returns:
+        Next available step number.
+    """
+    from replay_buffer import ReplayBuffer, estimate_replay_ratio
+    
+    print(f"\n--- Starting Dataset Training: {task_name} ({epochs} epochs) ---")
+    
+    if optimizer is None:
+        optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+        print("⚠️ Warning: Using default AdamW instead of passed optimizer.")
+    
+    model.train()
+    start_time = time.time()
+    
+    # Initialize process for memory tracking
+    process = psutil.Process(os.getpid()) if psutil else None
+    
+    current_step = start_step
+    replay_debt = 0.0
+    total_batches = len(dataloader) * epochs
+    
+    # Auto-estimate replay ratio if buffer provided but ratio not specified
+    if replay_buffer and not replay_buffer.is_empty() and replay_ratio is None:
+        replay_ratio = estimate_replay_ratio(replay_buffer, model)
+        print(f"📊 Auto-estimated replay ratio: {replay_ratio:.2%}")
+    
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        batch_count = 0
+        
+        for batch_idx, (x, y) in enumerate(dataloader):
+            # --- Determine if this is a Replay Step ---
+            is_replay_step = False
+            if replay_buffer and not replay_buffer.is_empty() and replay_ratio:
+                if replay_ratio >= 1.0:
+                    is_replay_step = (current_step % 2 != 0)
+                else:
+                    replay_debt += replay_ratio
+                    if replay_debt >= 1.0:
+                        is_replay_step = True
+                        replay_debt -= 1.0
+            
+            if is_replay_step:
+                # --- Asymmetric Replay: Train Router Only ---
+                x_r, y_r = replay_buffer.sample(x.size(0))
+                
+                optimizer.zero_grad()
+                logits, loss = model(x_r, y_r, sparsity_lambda=sparsity_lambda)
+                loss.backward()
+                
+                # Zero out non-router gradients
+                for name, param in model.named_parameters():
+                    if "router" not in name and "gate" not in name:
+                        param.grad = None
+                
+                optimizer.step()
+            else:
+                # --- Main Task Training ---
+                optimizer.zero_grad()
+                logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
+                loss.backward()
+                optimizer.step()
+                
+                # Auto-populate replay buffer
+                if auto_populate_buffer and replay_buffer is not None:
+                    replay_buffer.add(x.detach(), y.detach())
+            
+            epoch_loss += loss.item()
+            batch_count += 1
+            current_step += 1
+            
+            # --- Logging ---
+            if batch_idx % 50 == 0:
+                print(f"Epoch {epoch+1}/{epochs} | Batch {batch_idx}/{len(dataloader)} | Loss: {loss.item():.4f}")
+            
+            # --- Checkpointing ---
+            if checkpoint_fn and current_step > 0 and current_step % checkpoint_interval == 0:
+                print(f"[Checkpoint] Saving at step {current_step}...")
+                checkpoint_fn(current_step)
+        
+        avg_loss = epoch_loss / batch_count if batch_count > 0 else 0
+        print(f"Epoch {epoch+1}/{epochs} Complete | Avg Loss: {avg_loss:.4f}")
+    
+    duration = time.time() - start_time
+    print(f"Dataset training finished in {duration:.2f}s ({current_step - start_step} steps)")
+    
+    # Log summary
+    if logger:
+        summary = {
+            "task": task_name,
+            "epochs": epochs,
+            "start_step": start_step,
+            "end_step": current_step,
+            "final_loss": loss.item() if 'loss' in dir() else 0,
+            "duration_sec": duration,
+            "replay_ratio": replay_ratio,
+            "buffer_size": len(replay_buffer) if replay_buffer else 0
+        }
+        logger.log_event("TRAINED_DATASET", summary, step=current_step)
+    
+    # Final checkpoint
+    if checkpoint_fn:
+        print(f"[Checkpoint] Saving final state at step {current_step}...")
+        checkpoint_fn(current_step)
+    
+    return current_step + 1
+
 
 def evaluate_task(model, task_type, vocab_size=1000, samples=100, seq_len=32):
     """

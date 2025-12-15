@@ -60,3 +60,30 @@ The same logic applies to specific industrial data (e.g., Vibration sensors on m
 *   **Old Knowledge:** General physics/math learned from text/code.
 *   **New Modality:** Raw sensor data.
 *   **Synergy:** The model uses its general reasoning (Core) to detect anomalies in the sensor stream (Expansion) via cross-term transfer.
+
+## 6. Router 0: The "IDK Safety Net"
+Current routers only output gates (Open/Closed). There is no handling for "all routers are uncertain."
+**Goal:** Implement a Base Router (Router 0) as a confidence-aware fallback.
+
+*   **Router 0 (IDK Base):** An always-active residual path that catches inputs when all learned routers have low confidence.
+*   **Confidence Aggregation:** A meta-layer that detects "no router is confident" and activates Router 0.
+*   **Fallback Action:** Output a special `[IDK]` token or a generic "I don't know" embedding, preventing hallucinations on OOD inputs.
+*   **Use Case:** After training TinyStories (Router 1) and Math (Router 2), if questioned about Quantum Physics:
+    *   Router 1 (TinyStories): Low confidence (alien topic).
+    *   Router 2 (Math): Closed (no formulas).
+    *   Router 0 (IDK): Activates and outputs "I don't know" instead of hallucinating.
+
+This transforms DGE from a "Continual Learning" system into a "Self-Aware Curriculum Learner."
+
+## 7. Gradient-Weighted Reservoir Sampling (Optimal Replay Selection)
+Current ReplayBuffer uses uniform Reservoir Sampling (all samples equally likely).
+**Goal:** Save samples where the Router's gradient is highest.
+
+*   **Concept:** These are the "decision boundary" samples—the ones where the model is uncertain which pathway to use.
+*   **Why?** In DGE, the critical knowledge is "when to activate which quadrant." Samples that stress-test this decision are the most valuable for replay.
+*   **Implementation:**
+    *   During training, track `grad(Router)` magnitude for each sample.
+    *   Replace standard Reservoir Sampling with weighted sampling: P(keep) ∝ ||∇Router||.
+    *   Store the "hardest" samples, not random samples.
+*   **Expected Benefit:** Dramatically reduce replay buffer size while maintaining stability—only the "edge cases" matter.
+

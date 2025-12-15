@@ -1,0 +1,443 @@
+"""
+DGE Data Module
+
+Provides HuggingFace-compatible dataset loaders for DGE training.
+Supports TinyStories, BBC News, and custom text datasets.
+Includes local caching to data_store directory.
+
+Version: 0.5.1
+"""
+
+import torch
+import os
+import json
+from torch.utils.data import Dataset, DataLoader
+from typing import Optional, Callable, List
+
+# Default data store path
+DATA_STORE_PATH = os.path.join(os.path.dirname(__file__), 'data_store')
+
+try:
+    from datasets import load_dataset
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+    print("⚠️ HuggingFace datasets not installed. Run: pip install datasets")
+
+try:
+    from transformers import AutoTokenizer
+    TOKENIZER_AVAILABLE = True
+except ImportError:
+    TOKENIZER_AVAILABLE = False
+    print("⚠️ HuggingFace transformers not installed. Run: pip install transformers")
+
+
+def ensure_data_store():
+    """Ensure data_store directory exists."""
+    os.makedirs(DATA_STORE_PATH, exist_ok=True)
+    return DATA_STORE_PATH
+
+
+def list_local_datasets():
+    """List all locally stored datasets."""
+    ensure_data_store()
+    datasets = []
+    for item in os.listdir(DATA_STORE_PATH):
+        item_path = os.path.join(DATA_STORE_PATH, item)
+        if os.path.isdir(item_path):
+            meta_path = os.path.join(item_path, 'metadata.json')
+            if os.path.exists(meta_path):
+                with open(meta_path, 'r') as f:
+                    meta = json.load(f)
+                datasets.append({
+                    'name': item,
+                    'type': meta.get('type', 'unknown'),
+                    'samples': meta.get('num_samples', 0),
+                    'source': meta.get('source', 'unknown')
+                })
+    return datasets
+
+
+def download_hf_dataset(dataset_name, split='train', max_samples=None, text_field='text',
+                        local_name=None, force_download=False):
+    """
+    Download a HuggingFace dataset and store it locally.
+    
+    Args:
+        dataset_name: HuggingFace dataset name (e.g., 'roneneldan/TinyStories').
+        split: Dataset split ('train', 'validation', etc.).
+        max_samples: Maximum samples to download (None for all).
+        text_field: Name of the text field in the dataset.
+        local_name: Local name for the dataset (defaults to dataset_name).
+        force_download: If True, re-download even if exists.
+        
+    Returns:
+        Path to local dataset directory.
+    """
+    if not HF_AVAILABLE:
+        raise ImportError("HuggingFace datasets required. Run: pip install datasets")
+    
+    ensure_data_store()
+    
+    # Determine local name
+    if local_name is None:
+        local_name = dataset_name.replace('/', '_')
+    
+    local_path = os.path.join(DATA_STORE_PATH, local_name)
+    
+    # Check if already exists
+    if os.path.exists(local_path) and not force_download:
+        print(f"📂 Dataset already exists: {local_name}")
+        print(f"   Use force_download=True to re-download.")
+        return local_path
+    
+    print(f"⬇️ Downloading {dataset_name} ({split})...")
+    dataset = load_dataset(dataset_name, split=split)
+    
+    if max_samples:
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+    
+    # Extract texts
+    texts = []
+    for item in dataset:
+        if isinstance(item, dict) and text_field in item:
+            texts.append(item[text_field])
+        elif isinstance(item, str):
+            texts.append(item)
+        else:
+            # Try common field names
+            for field in ['text', 'story', 'content', 'article']:
+                if field in item:
+                    texts.append(item[field])
+                    break
+    
+    # Save locally
+    os.makedirs(local_path, exist_ok=True)
+    
+    # Save texts as JSON lines
+    texts_path = os.path.join(local_path, 'texts.jsonl')
+    with open(texts_path, 'w', encoding='utf-8') as f:
+        for text in texts:
+            f.write(json.dumps({'text': text}) + '\n')
+    
+    # Save metadata
+    metadata = {
+        'type': 'huggingface',
+        'source': dataset_name,
+        'split': split,
+        'num_samples': len(texts),
+        'text_field': text_field
+    }
+    with open(os.path.join(local_path, 'metadata.json'), 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    print(f"✅ Downloaded {len(texts)} samples to {local_path}")
+    return local_path
+
+
+def import_text_file(filepath, local_name=None, chunk_size=None, overlap=0.5):
+    """
+    Import a plain text file into data_store as a dataset.
+    
+    Args:
+        filepath: Path to the text file.
+        local_name: Name for the local dataset (defaults to filename).
+        chunk_size: If set, split text into chunks of this size.
+        overlap: Overlap ratio between chunks (0.0 - 1.0).
+        
+    Returns:
+        Path to local dataset directory.
+    """
+    ensure_data_store()
+    
+    # Read file
+    print(f"📄 Importing text file: {filepath}")
+    with open(filepath, 'r', encoding='utf-8') as f:
+        text = f.read()
+    
+    # Determine local name
+    if local_name is None:
+        local_name = os.path.splitext(os.path.basename(filepath))[0]
+    
+    local_path = os.path.join(DATA_STORE_PATH, local_name)
+    os.makedirs(local_path, exist_ok=True)
+    
+    # Create chunks or use whole paragraphs
+    if chunk_size:
+        stride = int(chunk_size * (1 - overlap))
+        chunks = []
+        for i in range(0, len(text) - chunk_size, stride):
+            chunks.append(text[i:i + chunk_size])
+    else:
+        # Split by paragraphs (double newline)
+        chunks = [p.strip() for p in text.split('\n\n') if p.strip()]
+    
+    # Save as JSONL
+    texts_path = os.path.join(local_path, 'texts.jsonl')
+    with open(texts_path, 'w', encoding='utf-8') as f:
+        for chunk in chunks:
+            f.write(json.dumps({'text': chunk}) + '\n')
+    
+    # Save metadata
+    metadata = {
+        'type': 'text_file',
+        'source': filepath,
+        'num_samples': len(chunks),
+        'original_chars': len(text),
+        'chunk_size': chunk_size,
+        'overlap': overlap
+    }
+    with open(os.path.join(local_path, 'metadata.json'), 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    print(f"✅ Imported {len(chunks)} samples to {local_path}")
+    return local_path
+
+
+def load_local_dataset(local_name, seq_len=128, batch_size=32, tokenizer_name='gpt2',
+                       vocab_size=None, shuffle=True):
+    """
+    Load a locally stored dataset as a DataLoader.
+    
+    Args:
+        local_name: Name of the local dataset.
+        seq_len: Sequence length for tokenization.
+        batch_size: Batch size.
+        tokenizer_name: Tokenizer to use.
+        vocab_size: Vocabulary size (for clamping).
+        shuffle: Whether to shuffle.
+        
+    Returns:
+        PyTorch DataLoader.
+    """
+    local_path = os.path.join(DATA_STORE_PATH, local_name)
+    texts_path = os.path.join(local_path, 'texts.jsonl')
+    
+    if not os.path.exists(texts_path):
+        raise FileNotFoundError(f"Dataset not found: {local_name}")
+    
+    print(f"📂 Loading local dataset: {local_name}")
+    
+    # Load texts
+    texts = []
+    with open(texts_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            data = json.loads(line.strip())
+            texts.append(data['text'])
+    
+    # Load tokenizer
+    tokenizer = None
+    if TOKENIZER_AVAILABLE and tokenizer_name:
+        print(f"🔤 Loading tokenizer: {tokenizer_name}")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    
+    # Create dataset
+    torch_dataset = TextDataset(texts, tokenizer, seq_len, vocab_size)
+    
+    # Create dataloader
+    dataloader = DataLoader(
+        torch_dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=0,
+        pin_memory=True
+    )
+    
+    print(f"✅ Loaded {len(texts)} samples, {len(dataloader)} batches")
+    return dataloader
+
+
+class TextDataset(Dataset):
+    """
+    PyTorch Dataset wrapper for tokenized text data.
+    
+    Converts text to token sequences for language modeling.
+    """
+    
+    def __init__(self, texts, tokenizer, seq_len=128, vocab_size=None):
+        """
+        Args:
+            texts: List of text strings or HuggingFace Dataset.
+            tokenizer: HuggingFace tokenizer or callable.
+            seq_len: Maximum sequence length.
+            vocab_size: If set, clamp token IDs to this range.
+        """
+        self.texts = texts
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+        self.vocab_size = vocab_size
+        
+    def __len__(self):
+        return len(self.texts)
+    
+    def __getitem__(self, idx):
+        text = self.texts[idx]
+        if isinstance(text, dict):
+            text = text.get('text', text.get('story', str(text)))
+        
+        # Tokenize
+        if self.tokenizer and callable(self.tokenizer):
+            tokens = self.tokenizer(
+                text, 
+                truncation=True, 
+                max_length=self.seq_len + 1,
+                padding='max_length',
+                return_tensors='pt'
+            )
+            input_ids = tokens['input_ids'].squeeze(0)
+        else:
+            # Fallback: simple character-level encoding
+            input_ids = torch.tensor([ord(c) % 1000 for c in text[:self.seq_len + 1]], dtype=torch.long)
+            if len(input_ids) < self.seq_len + 1:
+                input_ids = torch.nn.functional.pad(input_ids, (0, self.seq_len + 1 - len(input_ids)))
+        
+        # Clamp to vocab size if specified
+        if self.vocab_size:
+            input_ids = torch.clamp(input_ids, 0, self.vocab_size - 1)
+        
+        # Create input/target pairs (next token prediction)
+        x = input_ids[:-1]  # Input: all but last
+        y = input_ids[1:]   # Target: all but first (shifted by 1)
+        
+        return x, y
+
+
+def load_tinystories(split='train', max_samples=None, seq_len=128, batch_size=32, 
+                     tokenizer_name='gpt2', vocab_size=None, shuffle=True):
+    """
+    Load TinyStories dataset from HuggingFace.
+    
+    Args:
+        split: 'train' or 'validation'.
+        max_samples: Maximum number of samples to load (None for all).
+        seq_len: Sequence length for each sample.
+        batch_size: Batch size for DataLoader.
+        tokenizer_name: HuggingFace tokenizer to use.
+        vocab_size: If set, clamp token IDs to this range.
+        shuffle: Whether to shuffle the data.
+        
+    Returns:
+        PyTorch DataLoader.
+    """
+    if not HF_AVAILABLE:
+        raise ImportError("HuggingFace datasets required. Run: pip install datasets")
+    
+    print(f"📚 Loading TinyStories ({split})...")
+    dataset = load_dataset("roneneldan/TinyStories", split=split)
+    
+    if max_samples:
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+    
+    # Load tokenizer
+    if TOKENIZER_AVAILABLE and tokenizer_name:
+        print(f"🔤 Loading tokenizer: {tokenizer_name}")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    else:
+        tokenizer = None
+        print("⚠️ Using fallback character-level tokenization")
+    
+    # Create dataset
+    texts = [item['text'] for item in dataset]
+    torch_dataset = TextDataset(texts, tokenizer, seq_len, vocab_size)
+    
+    # Create dataloader
+    dataloader = DataLoader(
+        torch_dataset, 
+        batch_size=batch_size, 
+        shuffle=shuffle,
+        num_workers=0,
+        pin_memory=True
+    )
+    
+    print(f"✅ Loaded {len(torch_dataset)} samples, {len(dataloader)} batches")
+    return dataloader
+
+
+def load_text_file(filepath, seq_len=128, batch_size=32, vocab_size=1000, shuffle=True):
+    """
+    Load a plain text file as a dataset.
+    
+    Splits the file into overlapping chunks for training.
+    
+    Args:
+        filepath: Path to text file.
+        seq_len: Sequence length for each sample.
+        batch_size: Batch size for DataLoader.
+        vocab_size: Vocabulary size (for clamping).
+        shuffle: Whether to shuffle.
+        
+    Returns:
+        PyTorch DataLoader.
+    """
+    print(f"📄 Loading text file: {filepath}")
+    
+    with open(filepath, 'r', encoding='utf-8') as f:
+        text = f.read()
+    
+    # Split into chunks
+    chunk_size = seq_len + 1
+    stride = seq_len // 2  # 50% overlap
+    chunks = []
+    
+    for i in range(0, len(text) - chunk_size, stride):
+        chunks.append(text[i:i + chunk_size])
+    
+    # Simple character-level tokenization
+    class SimpleTextDataset(Dataset):
+        def __init__(self, chunks, vocab_size):
+            self.chunks = chunks
+            self.vocab_size = vocab_size
+            
+        def __len__(self):
+            return len(self.chunks)
+        
+        def __getitem__(self, idx):
+            chunk = self.chunks[idx]
+            tokens = torch.tensor([ord(c) % self.vocab_size for c in chunk], dtype=torch.long)
+            x = tokens[:-1]
+            y = tokens[1:]
+            return x, y
+    
+    dataset = SimpleTextDataset(chunks, vocab_size)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0)
+    
+    print(f"✅ Created {len(dataset)} samples from {len(text)} characters")
+    return dataloader
+
+
+# === Quick Test ===
+if __name__ == "__main__":
+    print("Testing data loaders...")
+    
+    # Test local store functions
+    ensure_data_store()
+    print(f"Data store path: {DATA_STORE_PATH}")
+    
+    # Test text import
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        f.write("The quick brown fox jumps over the lazy dog. " * 100)
+        temp_path = f.name
+    
+    local_path = import_text_file(temp_path, local_name='test_import', chunk_size=100)
+    print(f"Imported to: {local_path}")
+    
+    # List datasets
+    datasets = list_local_datasets()
+    print(f"Local datasets: {datasets}")
+    
+    # Load local dataset
+    loader = load_local_dataset('test_import', seq_len=32, batch_size=8, vocab_size=256)
+    x, y = next(iter(loader))
+    print(f"Local dataset batch: x={x.shape}, y={y.shape}")
+    
+    # Cleanup
+    import shutil
+    shutil.rmtree(os.path.join(DATA_STORE_PATH, 'test_import'))
+    os.remove(temp_path)
+    
+    print("\n✅ All data loader tests passed!")

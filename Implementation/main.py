@@ -145,7 +145,7 @@ class DGELab:
             
             #Define checkpoint callback
             def checkpoint_fn(step):
-                self.save_model()
+                self.save_model(current_step=step)
                 self.logger.log_event("CHECKPOINT", {"step": step}, step=step)
 
             if choice == '1':
@@ -200,7 +200,12 @@ class DGELab:
         print("="*50)
         
         try:
-            added = int(input("Enter added d_model (e.g. 64): "))
+            inp = input("Enter added d_model (e.g. 64): ").strip()
+            if not inp:
+                added = 64
+                print("Defaulting to 64.")
+            else:
+                added = int(inp)
             
             print("\nSelect Quadrant for FROZEN core:")
             print("1. ↖️ Top Left (Standard)")
@@ -297,13 +302,16 @@ class DGELab:
             except ValueError:
                 print("❌ Invalid input. Please enter integers.")
 
-    def save_model(self, create_snapshot=True):
+    def save_model(self, create_snapshot=True, current_step=None):
         if self.model is None:
             print("No model to save!")
             return
             
         save_dir = os.path.join(self.models_dir, self.model_name)
         os.makedirs(save_dir, exist_ok=True)
+        
+        # Determine step to log
+        step_to_log = current_step if current_step is not None else self.global_step
         
         # Prepare config
         config = {
@@ -313,7 +321,7 @@ class DGELab:
             'model_name': self.model_name,
             'vocab_size': self.model.token_emb.num_embeddings,
             'trained_skills': list(self.trained_skills),
-            'global_step': self.global_step
+            'global_step': step_to_log # Use the accurate step
         }
         
         # Save main/latest files
@@ -326,7 +334,7 @@ class DGELab:
             snapshots_dir = os.path.join(save_dir, 'snapshots')
             os.makedirs(snapshots_dir, exist_ok=True)
             
-            snapshot_name = f"step_{self.global_step:06d}"
+            snapshot_name = f"step_{step_to_log:06d}"
             snapshot_path = os.path.join(snapshots_dir, snapshot_name)
             os.makedirs(snapshot_path, exist_ok=True)
             
@@ -588,6 +596,8 @@ class DGELab:
             print("4. ⚙️  Run Experiment Chain V3 (V 0.3.x - Gradient Rescue & Orthogonality)")
             print("17. 🧪 Verify V21 RBF (Imprint + Rescue V4)")
             print("18. 🟢 Directed Synergy (Phase 2 Seed Fund)")
+            print("19. 📉 Variable Replay Ratio Sensitivity (0.01% - 50%)")
+            print("20. 📖 Train on TinyStories (HuggingFace)")
             print("b. 🔙 Back")
             print("q. 🚪 Exit")
             
@@ -884,6 +894,13 @@ class DGELab:
                 import run_seed_fund_experiment
                 print("\n🟢 Running Directed Synergy Verification (V26 Success)...")
                 run_seed_fund_experiment.run_seed_fund_experiment()
+            elif choice == '19':
+                import run_replay_ratio_experiment
+                print("\n📉 Running Variable Replay Ratio Sensitivity Experiment...")
+                run_replay_ratio_experiment.run_experiment()
+            elif choice == '20':
+                # TinyStories Training
+                self._run_tinystories_training()
             elif choice == 'b':
                 break
             elif choice == 'q':
@@ -955,7 +972,7 @@ class DGELab:
         print("\n[Phase 2] Training Skill A: COUNT_UP (500 steps)...")
         # Callback for periodic saves
         def checkpoint_fn(step):
-            self.save_model()
+            self.save_model(current_step=step)
             
         steps_a = 500
         new_step = train_task(
@@ -1052,6 +1069,192 @@ class DGELab:
         self.save_model()
         print("Validation Chain Complete.")
 
+    def _run_tinystories_training(self):
+        """
+        Train a fresh DGE model on TinyStories dataset from HuggingFace.
+        """
+        from data import load_tinystories
+        from dge_training import train_dataset
+        from replay_buffer import ReplayBuffer
+        
+        print("\n" + "="*60)
+        print("📖 TINYSTORIES TRAINING (HuggingFace)")
+        print("="*60)
+        
+        # Get user inputs
+        model_name = input("Model Name (default 'tinystories_dge'): ").strip() or "tinystories_dge"
+        max_samples = int(input("Max Samples (default 10000, 0=all): ").strip() or 10000)
+        epochs = int(input("Epochs (default 1): ").strip() or 1)
+        batch_size = int(input("Batch Size (default 32): ").strip() or 32)
+        seq_len = int(input("Sequence Length (default 128): ").strip() or 128)
+        
+        # Model config - use GPT-2's vocab size for compatibility
+        d_model = int(input("d_model (default 256): ").strip() or 256)
+        n_layer = int(input("n_layer (default 4): ").strip() or 4)
+        n_head = int(input("n_head (default 8): ").strip() or 8)
+        vocab_size = 50257  # GPT-2 vocab size
+        
+        print(f"\n🔧 Creating model: {model_name}")
+        print(f"   Config: d={d_model}, layers={n_layer}, heads={n_head}, vocab={vocab_size}")
+        
+        # Create fresh model
+        self.model = DGESimpleTransformer(
+            vocab_size=vocab_size, 
+            d_model=d_model, 
+            n_layer=n_layer, 
+            n_head=n_head
+        )
+        self.model_name = model_name
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-4, weight_decay=0.01)
+        self.trained_skills = set()
+        self.global_step = 0
+        
+        # Init Logger
+        self.logger = DGELogger(os.path.join(self.models_dir, model_name))
+        self.logger.log_event("CREATED", self._get_model_state(), step=0)
+        
+        # Save initial checkpoint
+        self.save_model()
+        
+        # Load TinyStories
+        print(f"\n📚 Loading TinyStories dataset...")
+        dataloader = load_tinystories(
+            split='train',
+            max_samples=max_samples if max_samples > 0 else None,
+            seq_len=seq_len,
+            batch_size=batch_size,
+            tokenizer_name='gpt2',
+            vocab_size=vocab_size
+        )
+        
+        # Create replay buffer for future expansion
+        replay_buffer = ReplayBuffer(max_size=5000, task_name="tinystories")
+        
+        # Define checkpoint callback
+        def checkpoint_fn(step):
+            self.save_model(current_step=step)
+        
+        # Train!
+        print(f"\n🏋️ Starting training: {epochs} epoch(s)...")
+        new_step = train_dataset(
+            model=self.model,
+            dataloader=dataloader,
+            epochs=epochs,
+            optimizer=self.optimizer,
+            logger=self.logger,
+            start_step=self.global_step,
+            checkpoint_fn=checkpoint_fn,
+            checkpoint_interval=500,
+            replay_buffer=replay_buffer,
+            replay_ratio=0.0,  # No replay on first task
+            task_name="tinystories",
+            auto_populate_buffer=True
+        )
+        
+        self.global_step = new_step
+        self.trained_skills.add("TINYSTORIES")
+        
+        # Save replay buffer for future use
+        buffer_path = os.path.join(self.models_dir, model_name, 'replay_buffer')
+        replay_buffer.save(buffer_path)
+        
+        # Final save
+        self.save_model()
+        
+        print("\n" + "="*60)
+        print(f"✅ TinyStories training complete!")
+        print(f"   Model: {model_name}")
+        print(f"   Steps: {self.global_step}")
+        print(f"   Replay Buffer: {len(replay_buffer)} samples saved")
+        print("="*60)
+
+    def _dataset_menu(self):
+        """
+        Dataset management menu for downloading and importing datasets.
+        """
+        from data import (list_local_datasets, download_hf_dataset, 
+                         import_text_file, DATA_STORE_PATH)
+        
+        while True:
+            print("\n" + "="*50)
+            print("🗂️  DATASET MANAGER")
+            print("="*50)
+            print(f"📁 Data Store: {DATA_STORE_PATH}")
+            
+            # List existing datasets
+            datasets = list_local_datasets()
+            if datasets:
+                print(f"\n📂 Local Datasets ({len(datasets)}):")
+                for ds in datasets:
+                    print(f"   • {ds['name']}: {ds['samples']} samples ({ds['type']})")
+            else:
+                print("\n📂 No local datasets yet.")
+            
+            print("\n--- Actions ---")
+            print("1. ⬇️  Download from HuggingFace")
+            print("2. 📄 Import Text File")
+            print("3. 🔄 Refresh List")
+            print("b. 🔙 Back")
+            
+            choice = input("\nSelect Option: ").strip().lower()
+            
+            if choice == '1':
+                print("\n--- Download from HuggingFace ---")
+                print("Examples: roneneldan/TinyStories, wikitext, openai/gsm8k")
+                dataset_name = input("Dataset Name: ").strip()
+                if not dataset_name:
+                    print("❌ No dataset name provided.")
+                    continue
+                
+                split = input("Split (default 'train'): ").strip() or 'train'
+                max_samples_str = input("Max Samples (default 10000, 0=all): ").strip() or '10000'
+                max_samples = int(max_samples_str) if max_samples_str != '0' else None
+                text_field = input("Text Field (default 'text'): ").strip() or 'text'
+                local_name = input("Local Name (default auto): ").strip() or None
+                
+                try:
+                    path = download_hf_dataset(
+                        dataset_name=dataset_name,
+                        split=split,
+                        max_samples=max_samples,
+                        text_field=text_field,
+                        local_name=local_name,
+                        force_download=True
+                    )
+                    print(f"✅ Downloaded to: {path}")
+                except Exception as e:
+                    print(f"❌ Download failed: {e}")
+                    
+            elif choice == '2':
+                print("\n--- Import Text File ---")
+                filepath = input("File Path: ").strip()
+                if not filepath or not os.path.exists(filepath):
+                    print("❌ File not found.")
+                    continue
+                
+                local_name = input("Local Name (default: filename): ").strip() or None
+                chunk_str = input("Chunk Size (default: split by paragraphs): ").strip()
+                chunk_size = int(chunk_str) if chunk_str else None
+                
+                try:
+                    path = import_text_file(
+                        filepath=filepath,
+                        local_name=local_name,
+                        chunk_size=chunk_size
+                    )
+                    print(f"✅ Imported to: {path}")
+                except Exception as e:
+                    print(f"❌ Import failed: {e}")
+                    
+            elif choice == '3':
+                print("🔄 Refreshing...")
+                # Loop will refresh automatically
+                
+            elif choice == 'b':
+                break
+            else:
+                print("❌ Invalid option.")
+
     def run(self):
         print(f"\nWelcome to DGE Lab {__version__} (Forensic & Checkpoint Edition)")
         while True:
@@ -1074,6 +1277,7 @@ class DGELab:
             print("i. 🔍  Inspect Model")
             print("r. 🎲  Run Inference")
             print("f. 📊  Full Skill Benchmark")
+            print("d. 🗂️  Dataset Manager")
             print("x. 🧪  Experiments (Automated)")
             
             print("\n--- System ---")
@@ -1099,6 +1303,8 @@ class DGELab:
                 self.benchmark_skills()
             elif choice == 'x':
                 self.experiment_menu()
+            elif choice == 'd':
+                self._dataset_menu()
             elif choice == 'q':
                 print("👋 Exiting... Goodbye!")
                 break

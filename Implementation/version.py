@@ -1,1 +1,1 @@
-__version__ = "V 0.4.3"  # UI Polish: Enhanced Menus & Shortcuts
+__version__ = "V 0.5.0"  # Phase 6: Real Dataset Infrastructure (HuggingFace, Replay Buffer, Dataset Manager)
