@@ -1,0 +1,130 @@
+\documentclass[a4paper, 11pt]{article}
+
+% === PACKAGES ===
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{tikz}
+\usetikzlibrary{matrix,positioning,arrows.meta,calc}
+
+% === LAYOUT ===
+\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=3cm}
+
+% === THEOREMS ===
+\newtheorem{proposition}{Proposition}
+\newtheorem{definition}{Definition}
+\newtheorem{lemma}{Lemma}
+
+% === METADATA ===
+\title{\textbf{Directed Synergy: Mitigating the Plasticity-Stability Dilemma via Contextual Gating}}
+\author{Dipl.-Inf. Sven Jansen}
+\date{December 2024}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Continual learning in neural networks aims to resolve the \textbf{Plasticity-Stability Dilemma}. While strict architectural separation offers a theoretical guarantee against forgetting, our experiments suggest that in deep transformers with shared embeddings, "Strict Separation" is often intractable due to leakage ("Leakage Creep"). We introduce \textbf{Directed Synergy}, a framework combining architectural gating with \textbf{Asymmetric Experience Replay}. By employing \textbf{Bigram Contextual Routers} to disambiguate task states and \textbf{Structural Bias} (Zero Initialization), DGE achieves high plasticity and recovers stability to near-baseline levels on sequential skill acquisition tasks.
+\end{abstract}
+
+\section{Introduction}
+
+The Plasticity-Stability Dilemma remains a central challenge. We propose \textbf{Directed Synergy}, formally defined as the integration of:
+\begin{enumerate}
+    \item \textbf{Contextual Gating:} To resolve aliasing between tasks sharing identical tokens.
+    \item \textbf{Asymmetric Replay:} Freezing new capacity during replay to enforce strict boundary learning.
+    \item \textbf{Soft Separation:} Using initialization priors to bias the network towards separation without rigid locking.
+\end{enumerate}
+
+\section{Formal Problem Statement}
+
+\subsection{Context-Dependent Aliasing}
+
+\begin{definition}[Context-Dependent Aliasing]
+Aliasing occurs when two tasks $T_A, T_B$ share an input $x$, but require distinct outputs $y_A, y_B$. A router $R(x)$ with Markov order $k=0$ cannot distinguish these cases ($R(x|T_A) = R(x|T_B)$), leading to interference.
+\end{definition}
+
+\begin{proposition}[Contextual Resolution]
+A Contextual Router $R(x_t, x_{t-1})$ with Markov order $k \ge 1$ allows separation iff the transition history differs: $(x_{t-1} \to x_t)_{T_A} \neq (x_{t-1} \to x_t)_{T_B}$.
+\end{proposition}
+
+\section{Methodology: The Dual-Gate Architecture}
+
+We introduce two distinct gate types with specific functional domains:
+
+\subsection{Forward Gate (Sigmoid)}
+$G_{fwd} \in [0, 1]^{n \times k}$ controls signal visibility during inference.
+\begin{equation}
+    G_{fwd} = \sigma(\mathbf{B} + \text{Bias})
+\end{equation}
+where $\mathbf{B} = g^{row} \oplus g^{col}$ denotes the \textbf{Broadcast Addition} (Outer Sum), defined as $B_{ij} = g^{row}_i + g^{col}_j$. This rank-1 update structure reduces parameter count from $O(n \cdot k)$ to $O(n + k)$.
+
+\subsection{Backward Gate (Binary Checkpoint)}
+$G_{bwd} \in \{0, 1\}^{n \times k}$ controls plasticity during training via a gradient mask.
+\begin{equation}
+    \nabla W_{updated} = \nabla W_{raw} \odot G_{bwd} + \Psi(\nabla G)
+\end{equation}
+Where $\Psi$ (Rescue Term) is a heuristic gradient injection. If the mean gate activation $\mu(G_{fwd}) < \epsilon$ (Dead Gate), we inject positive gradient noise scaled by $\alpha$ to stimulate re-opening: $\Psi = \alpha \cdot \mathbb{I}(\mu < \epsilon)$.
+
+\section{Experimental Results}
+
+\subsection{Preliminary Results on Sequential Skills}
+
+We evaluated DGE on a sequential skill task ("Count Up" $\to$ "Count Down") designed to induce maximum aliasing (identical tokens, reversed logic).
+
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Configuration} & \textbf{Replay} & \textbf{Router} & \textbf{Init} & \textbf{Plasticity} & \textbf{Stability} \\
+\midrule
+Baseline (No DGE) & None & - & - & High (1.0) & Fail (16.0) \\
+Strict Separation & None & MLP & Random & Fail (1.3) & Fail (16.4) \\
+\textbf{Directed Synergy} & \textbf{Asym.} & \textbf{Bigram} & \textbf{0.0} & \textbf{Success (1.0)} & \textbf{Success (1.98)} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textit{Note: Stability loss of 1.98 represents recovery to pre-task2 baseline levels, compared to catastrophic forgetting (16.0).}
+
+\subsection{Ongoing Benchmarking}
+
+\textbf{[Work in Progress]} We are currently extending evaluation to standard benchmarks including Split-CIFAR10, Permuted MNIST, and larger NLP corpora (C4/Wikitext). Preliminary data collection is underway to validate scalability and OOD generalization.
+
+\section{Related Work}
+
+\begin{itemize}
+    \item \textbf{Regularization:} EWC (Kirkpatrick et al., 2017) and SI constrain weights but limit plasticity in deep nets.
+    \item \textbf{Replay:} GEM/A-GEM use gradients to constrain updates; DGE's Asymmetric Replay is a simplified, architecture-aware variant.
+    \item \textbf{Architecture:} Progressive Networks add capacity but lack the shared embedding efficiency of DGE.
+\end{itemize}
+
+\section{Limitations}
+
+\begin{enumerate}
+    \item \textbf{Contextual Overhead:} Bigram Routers double the input dimension size for the gating layer.
+    \item \textbf{Memory Footprint:} Full matrix expansion is memory-intensive compared to LoRA-style adapters.
+    \item \textbf{Replay Dependency:} The method still relies on a small (10\%) replay buffer.
+\end{enumerate}
+
+\section{Conclusion}
+
+Directed Synergy offers a promising mitigation of the Plasticity-Stability dilemma. By acknowledging physical limitations (Leakage) and addressing logical ambiguities (Aliasing) via Contextual Gating, it provides a stable foundation for continual learning.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{9}
+\bibitem{gge} Jansen, S. (2024). Gated Ghost Expansion.
+\bibitem{ewc} Kirkpatrick, J., et al. (2017). Overcoming catastrophic forgetting in neural networks. PNAS.
+\bibitem{gem} Lopez-Paz, D. & Ranzato, M. (2017). Gradient Episodic Memory for Continual Learning. NeurIPS.
+\bibitem{rope} Su, J., et al. (2021). RoFormer: Enhanced Transformer with Rotary Position Embedding.
+\end{thebibliography}
+
+\end{document}
