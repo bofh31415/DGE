@@ -518,11 +518,21 @@ class DGELab:
         """
         choice = choice.strip().lower()
         
-        if choice == '1':
-            self.run_dge_validation_chain()
-        elif choice == '2':
-            # Single Experiment (Legacy Option 8)
-            print("\n🧪 RUNNING SINGLE EXPERIMENT (V 0.2.0 Spec)...")
+        # Remap simplified choices to working experiments
+        choice_map = {'1': '18', '2': '19', '3': '20'}
+        choice = choice_map.get(choice, choice)
+        
+        if choice == '18':
+            import run_seed_fund_experiment
+            print("\n🟢 Running Directed Synergy (V26 - Working Config)...")
+            run_seed_fund_experiment.run_seed_fund_experiment()
+        elif choice == '19':
+            import run_replay_ratio_experiment
+            print("\n📉 Running Variable Replay Ratio Sensitivity Experiment...")
+            run_replay_ratio_experiment.run_experiment()
+        elif choice == '20':
+            self._run_tinystories_training()
+        elif choice == '17':
             self.reset_model()
             vocab_size = 500
             
@@ -577,34 +587,39 @@ class DGELab:
             import run_seed_fund_experiment
             print("\n🟢 Running Directed Synergy Verification (V26 Success)...")
             run_seed_fund_experiment.run_seed_fund_experiment()
+        elif choice == '19':
+            import run_replay_ratio_experiment
+            print("\n📉 Running Variable Replay Ratio Sensitivity Experiment...")
+            run_replay_ratio_experiment.run_experiment()
+        elif choice == '20':
+            self._run_tinystories_training()
         else:
             print(f"❌ Unknown experiment choice: '{choice}'")
-            print("Available experiments: 1, 2, 17, 18")
-            print("  1: DGE Validation Chain (V 0.2.x Baseline)")
-            print("  2: Single Experiment (V 0.2.0 Spec)")
-            print("  17: Verify V21 RBF (Imprint + Rescue V4)")
-            print("  18: Directed Synergy (Phase 2 Seed Fund)")
+            print("Available experiments: 1, 2, 3 (or legacy: 17, 18, 19, 20)")
+            print("  1/18: Directed Synergy (V26 - Working Config)")
+            print("  2/19: Variable Replay Ratio Sensitivity")
+            print("  3/20: TinyStories Training")
 
     def experiment_menu(self):
         while True:
             print("\n" + "="*50)
             print("🧪  EXPERIMENTS MENU")
             print("="*50)
-            print("1. 🔗 Run DGE Validation Chain (V 0.2.x Baseline)")
-            print("2. 🧪 Run Single Experiment (V 0.2.0 Spec)")
-            print("3. ⛓️  Run Experiment Chain V2 (V 0.3.x - Noise Init Hypotheses)")
-            print("4. ⚙️  Run Experiment Chain V3 (V 0.3.x - Gradient Rescue & Orthogonality)")
-            print("17. 🧪 Verify V21 RBF (Imprint + Rescue V4)")
-            print("18. 🟢 Directed Synergy (Phase 2 Seed Fund)")
-            print("19. 📉 Variable Replay Ratio Sensitivity (0.01% - 50%)")
-            print("20. 📖 Train on TinyStories (HuggingFace)")
+            print("1. 🟢 Directed Synergy (V26 - Working Config)")
+            print("2. 📉 Variable Replay Ratio Sensitivity (0.01% - 50%)")
+            print("3. 📖 Train on TinyStories (HuggingFace)")
             print("b. 🔙 Back")
             print("q. 🚪 Exit")
             
             choice = input("\nSelect Option: ").strip().lower()
+            # Remap simplified menu choices to working experiments
+            choice_map = {'1': '18', '2': '19', '3': '20'}
+            choice = choice_map.get(choice, choice)
             
-            if choice == '1':
-                self.run_dge_validation_chain()
+            if choice == '18':
+                import run_seed_fund_experiment
+                print("\n🟢 Running Directed Synergy (V26 - Working Config)...")
+                run_seed_fund_experiment.run_seed_fund_experiment()
             elif choice == '2':
                 # Single Experiment (Legacy Option 8)
                 print("\\n🧪 RUNNING SINGLE EXPERIMENT (V 0.2.0 Spec)...")
