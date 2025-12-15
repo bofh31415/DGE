@@ -158,6 +158,7 @@ class DGELab:
                 steps = int(input("Steps (default 500): ") or 500)
                 new_step = train_task(self.model, TaskType.COUNT_UP, vocab_size=vocab, steps=steps, 
                                      logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn,
+                                     optimizer=self.optimizer,
                                      replay_tasks=replay_list)
                 self.global_step = new_step
                 self.trained_skills.add(TaskType.COUNT_UP.name)
@@ -173,6 +174,7 @@ class DGELab:
                 steps = int(input("Steps (default 500): ") or 500)
                 new_step = train_task(self.model, TaskType.COUNT_DOWN, vocab_size=vocab, steps=steps, 
                                      logger=self.logger, start_step=self.global_step, checkpoint_fn=checkpoint_fn,
+                                     optimizer=self.optimizer,
                                      replay_tasks=replay_list)
                 self.global_step = new_step
                 self.trained_skills.add(TaskType.COUNT_DOWN.name)
@@ -873,9 +875,9 @@ class DGELab:
                 print("\n🧪 Running V21 RBF Verification...")
                 run_v21_rbf.run_experiment()
             elif choice == '18':
-                import run_synergy_experiment
-                print("\n🟢 Running Directed Synergy Experiment...")
-                run_synergy_experiment.run_synergy_experiment()
+                import run_seed_fund_experiment
+                print("\n🟢 Running Directed Synergy Verification (V26 Success)...")
+                run_seed_fund_experiment.run_seed_fund_experiment()
             elif choice == 'b':
                 break
             elif choice == 'q':
