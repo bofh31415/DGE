@@ -96,7 +96,8 @@ def run_synergy_experiment():
         router_type='mlp', # Contextual Router to help separation
         use_orthogonal_init=True, # Safety default
         use_gradient_rescue=True, # Safety default (though less needed if open)
-        isolate_cross_terms=False # EXPLICIT: Enable Old->New Synergy
+        isolate_cross_terms=False, # EXPLICIT: Enable Old->New Synergy
+        router_init_bias=0.0 # CRITICAL: Gates OPEN for plasticity
     )
     
     # --- FORENSIC CHECK FUNCTION ---

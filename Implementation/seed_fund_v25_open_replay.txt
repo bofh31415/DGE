@@ -1,0 +1,77 @@
+============================================================
+­ƒº¬ SEED FUND EXPERIMENT: Directed Synergy Validation
+============================================================
+Model: dge_seed_fund_20251215_173106
+Config: vocab=500, d_model=64, layers=2, heads=4
+
+============================================================
+­ƒôÜ PHASE 1: Training Task A (Seed Fund)
+============================================================
+
+--- Starting Training: COUNT_UP (500 steps) ---
+Step 0 (+0) | Loss: 7.6940
+Step 50 (+50) | Loss: 1.9603
+Step 100 (+100) | Loss: 1.3108
+Step 150 (+150) | Loss: 1.3043
+Step 200 (+200) | Loss: 1.3030
+Step 250 (+250) | Loss: 1.3021
+Step 300 (+300) | Loss: 1.3016
+Step 350 (+350) | Loss: 1.3012
+Step 400 (+400) | Loss: 1.3010
+Step 450 (+450) | Loss: 1.3009
+Step 499 (+499) | Loss: 1.3008
+Training finished in 29.89s
+
+Ô£à Task A Baseline:
+   PPL: 3.67
+   Accuracy: 100.0%
+
+============================================================
+­ƒöÆ PHASE 2: Freezing Core & Expanding with Synergy
+============================================================
+Expanding DGE Model: d_model 64 -> 96 (Heads: 4 -> 6) (Router: mlp) [Rescue: True, Ortho: False, BlockDiag: False, Policy: full, Threshold: 0.0]
+Expanding Layer 0...
+Expanding Layer 1...
+Expansion Complete.
+
+Ô£à Post-Expansion Task A:
+   PPL: 1.97 (╬ö = -1.71)
+   Accuracy: 100.0% (╬ö = +0.0%)
+   Identity Preserved: ÔØî NO
+
+============================================================
+­ƒÄ» PHASE 3: Training Task B with Directed Synergy
+============================================================
+Step    0 | Task B PPL: 271558780.99 | Task A Probe PPL: 1.97
+Step   50 | Task B PPL: 59405719.77 | Task A Probe PPL: 2.42
+Step  100 | Task B PPL: 1803.32 | Task A Probe PPL: 27.40
+Step  150 | Task B PPL: 17.53 | Task A Probe PPL: 214.52
+Step  200 | Task B PPL: 21.45 | Task A Probe PPL: 16.65
+Step  250 | Task B PPL: 15.96 | Task A Probe PPL: 12.75
+Step  300 | Task B PPL: 16.55 | Task A Probe PPL: 10.20
+Step  350 | Task B PPL: 16.93 | Task A Probe PPL: 9.11
+Step  400 | Task B PPL: 15.92 | Task A Probe PPL: 8.00
+Step  450 | Task B PPL: 12.77 | Task A Probe PPL: 7.51
+Step  499 | Task B PPL: 14.32 | Task A Probe PPL: 5.74
+
+============================================================
+­ƒôè FINAL EVALUATION
+============================================================
+
+­ƒôê STABILITY (Task A Retention):
+   Baseline PPL: 3.67
+   Final PPL:    5.81
+   ╬ö PPL:        +2.14
+   Accuracy:     66.5%
+   SUCCESS: ÔØî NO (PPL < 2.0)
+
+­ƒôë PLASTICITY (Task B Acquisition):
+   Final PPL:    14.88
+   Accuracy:     31.0%
+   SUCCESS: ÔØî NO (PPL < 3.0)
+
+============================================================
+ÔØî FAILURE: Both metrics failed
+============================================================
+
+­ƒôü Logs saved to: C:\Users\Sven\Documents\DGE\Implementation\models\dge_seed_fund_20251215_173106

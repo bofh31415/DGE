@@ -3,7 +3,116 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from enum import Enum
-from typing import Union
+from typing import Union, Optional
+from dataclasses import dataclass, field
+
+
+@dataclass
+class QuadrantInitConfig:
+    """
+    Explicit per-quadrant initialization policies for Directed Synergy.
+    
+    Quadrant Layout (after expansion):
+        | Q_TL (New→Old) | Q_TR (Old→Old) |
+        | Q_BL (New→New) | Q_BR (Old→New) |
+        
+    Where:
+        - Rows = Output features (Top = Old, Bottom = New)
+        - Cols = Input features (Left = New, Right = Old)
+    """
+    # Q_TR (Core): Old→Old - Always frozen
+    q_tr_frozen: bool = True
+    
+    # Q_BR (Synergy): Old→New - Enables new tasks to read old features
+    q_br_init_std: float = 0.02
+    q_br_trainable: bool = True
+    
+    # Q_BL (Capacity): New→New - New feature interactions
+    q_bl_init_std: float = 0.02
+    q_bl_trainable: bool = True
+    
+    # Q_TL (Firewall): New→Old - DANGER ZONE
+    q_tl_zero_init: bool = True      # Initialize weights to zero
+    q_tl_trainable: bool = False     # Hard freeze by default
+    q_tl_use_replay: bool = False    # Soft separation via replay penalty
+
+
+class ExperienceReplayPenalty(nn.Module):
+    """
+    Experience Replay Constraint for Q_TL (New→Old) quadrant.
+    
+    Instead of hard-freezing Q_TL, this allows "soft separation" by penalizing
+    any activation in Q_TL that would disrupt old task outputs.
+    
+    Usage:
+        1. Before expansion: store_reference(old_model_output)
+        2. During training: penalty = compute_penalty(new_model_output)
+        3. Add penalty to loss: total_loss = task_loss + replay_weight * penalty
+        
+    Mathematical Guarantee:
+        If Q_TL weights start at 0 and penalty weight is high enough,
+        the model will maintain identity: y_old ≈ y_core
+    """
+    def __init__(self, old_out_dim: int, penalty_weight: float = 0.1):
+        super().__init__()
+        self.old_out_dim = old_out_dim
+        self.penalty_weight = penalty_weight
+        self.reference_outputs: Optional[torch.Tensor] = None
+        self.register_buffer('_initialized', torch.tensor(False))
+        
+    def store_reference(self, old_output: torch.Tensor):
+        """
+        Store reference output from old model before expansion.
+        Should be called with outputs from a representative batch.
+        
+        Args:
+            old_output: [Batch, Seq, OldDim] or [Batch, OldDim]
+        """
+        # Detach and clone to prevent gradient leakage
+        self.reference_outputs = old_output.detach().clone()
+        self._initialized.fill_(True)
+        
+    def compute_penalty(self, new_output: torch.Tensor) -> torch.Tensor:
+        """
+        Compute MSE penalty between new output (old dimensions) and reference.
+        
+        Args:
+            new_output: [Batch, Seq, NewDim] or [Batch, NewDim]
+            
+        Returns:
+            penalty: Scalar MSE loss on old output dimensions
+        """
+        if self.reference_outputs is None:
+            return torch.tensor(0.0, device=new_output.device)
+            
+        # Extract old dimensions from new output
+        if new_output.dim() == 3:
+            # [B, T, D] -> [B, T, old_out_dim]
+            new_old_part = new_output[..., :self.old_out_dim]
+        else:
+            # [B, D] -> [B, old_out_dim]
+            new_old_part = new_output[..., :self.old_out_dim]
+            
+        # Ensure shapes match
+        if new_old_part.shape != self.reference_outputs.shape:
+            # Truncate or pad reference if batch size differs
+            min_batch = min(new_old_part.shape[0], self.reference_outputs.shape[0])
+            new_old_part = new_old_part[:min_batch]
+            ref = self.reference_outputs[:min_batch]
+        else:
+            ref = self.reference_outputs
+            
+        # MSE penalty
+        penalty = F.mse_loss(new_old_part, ref)
+        return penalty * self.penalty_weight
+        
+    def forward(self, new_output: torch.Tensor) -> torch.Tensor:
+        """Convenience method for use in training loop."""
+        return self.compute_penalty(new_output)
+        
+    def is_initialized(self) -> bool:
+        """Check if reference has been stored."""
+        return bool(self._initialized.item())
 
 class DGEAdamW(torch.optim.AdamW):
     """
@@ -578,11 +687,19 @@ def expand_dge_linear(
             # --- PHASE 3: THE FIREWALL (Asymmetric Init) ---
             # 1. Q_BL (New->New) & Q_BR (Old->New): Noise Init (Capacity & Synergy)
             nn.init.normal_(new_layer.weight[old_out:, :], mean=0.0, std=0.02)
-            
-            # 2. Q_TR (New->Old): ZERO INIT (Firewall)
-            # This is the "Leak Path" where new inputs corrupt old outputs.
-            # We enforce exact zeros here. The gate can open, but it transmits silence.
-            # Identity is preserved: Y_old = W_old * X_old + Gate * 0.0 * X_new = Y_old.
+        
+        # --- PHASE 3: THE FIREWALL (Unconditional Zero Init) ---
+        # This MUST happen AFTER orthogonal/noise init to ensure Firewall is zeroed.
+        # Q_TL (New In -> Old Out): ZERO INIT (Firewall)
+        # This is the "Leak Path" where new inputs corrupt old outputs.
+        # We enforce exact zeros here. The gate can open, but it transmits silence.
+        #
+        # CRITICAL FIX (V 0.3.1): Only apply Firewall when there are NEW OUTPUT ROWS.
+        # For layers like LM Head with input-only expansion (added_out=0), the new
+        # columns MUST be trainable to allow reading from new dimensions.
+        # Without this fix, LM Head cannot produce meaningful output from new features.
+        if added_in > 0 and added_out > 0:
+            # Only zero Q_TL when there IS a true Q_TL (i.e., new outputs exist)
             new_layer.weight[:old_out, old_in:].zero_()
         
         # Clean up bias for new rows
@@ -631,13 +748,13 @@ def expand_dge_linear(
     # We strictly FREEZE the New->Old quadrant to prevent Leakage Creep.
     # Without Replay, any plasticity here destroys Old Task performance.
     # Q_TL (New In -> Old Out) = FROZEN.
-    mask[:old_out, old_in:] = 0.0
+    #
+    # CRITICAL FIX (V 0.3.1): Only freeze Q_TL when there ARE new output rows.
+    # For input-only expansion (LM Head), there is no Q_TL, only new input columns.
+    # These new columns MUST be trainable!
+    if added_out > 0:
+        mask[:old_out, old_in:] = 0.0
     
-    # Isolate Cross Terms (Sidecar Mode)
-    # 5. Gradient Masking (Backward Hook)
-    # 1 = Update, 0 = Freeze.
-    mask = torch.ones(new_out, new_in)
-    mask[:old_out, :old_in] = 0.0 # Freeze Old Core
     
     # Isolate Cross Terms (Sidecar Mode)
     if cross_term_policy == 'block_diagonal':
@@ -860,6 +977,13 @@ def expand_embedding(embedding, added_dim):
     frozen_mask[:old_dim] = 1.0
     # Register purely for persistence if we wanted to save it, but hook needs it in closure or attribute
     new_emb.register_buffer('frozen_mask', frozen_mask)
+    
+    # CRITICAL FIX V 0.3.1: Set dge_mask for DGEAdamW weight decay protection
+    # dge_mask shape must match weight shape [vocab_size, new_dim]
+    # 0.0 = protected from weight decay, 1.0 = apply weight decay
+    dge_mask = torch.zeros(vocab_size, new_dim)
+    dge_mask[:, old_dim:] = 1.0  # Only apply weight decay to new columns
+    new_emb.weight.dge_mask = dge_mask  # Attach to parameter
     
     # CRITICAL FIX V15: Hook the gradients to enforce the mask!
     def hook_fn(grad):

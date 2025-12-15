@@ -1,0 +1,66 @@
+======================================================================
+DIAGNOSTIC EXPERIMENT: Dead Sidecar Investigation
+======================================================================
+
+[PHASE 1] Training Task A (COUNT_UP)...
+Task A Accuracy: 100.0%
+
+[PHASE 2] Expanding model with Directed Synergy...
+Expanding DGE Model: d_model 64 -> 96 (Heads: 4 -> 6) (Router: mlp) [Rescue: True, Ortho: False, BlockDiag: False, Policy: full, Threshold: 0.0]
+Expanding Layer 0...
+Expanding Layer 1...
+Expansion Complete.
+
+[DIAGNOSTICS] Pre-Training Stats:
+  Gate Bias Range: [0.00, 0.00]
+  Gate Open Prob Range: [0.50, 0.50]
+  Mean Gate Open Prob: 0.5000
+  Weight Norms:
+    Q_TR (Core): 32.8712
+    Q_BR (Synergy): 5.4106
+    Q_BL (Capacity): 0.0000
+    Q_TL (Firewall): 0.000000
+    Embedding New: 2.5115
+    LM Head New: 0.0000
+
+[PHASE 3] Training Task B (COUNT_DOWN) with Diagnostics...
+----------------------------------------------------------------------
+ Step |     Loss |   Active_G |     Gate_G |     Q_BR_G |     Q_BL_G |  Probe_A
+----------------------------------------------------------------------
+    0 |  19.5088 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+   50 |  19.2506 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  100 |  19.2109 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  150 |  19.6179 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  200 |  19.3082 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  250 |  19.3648 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  300 |  19.6138 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  350 |  19.5410 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  400 |  19.5551 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  450 |  19.3330 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+  499 |  19.4265 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   0.00e+00 |   100.0%
+----------------------------------------------------------------------
+
+[FINAL] Evaluation:
+  Task A Accuracy: 100.0%
+  Task B Accuracy: 0.0%
+
+[FINAL] Gate Stats:
+  Gate Bias Range: [0.00, 0.00]
+  Mean Gate Open Prob: 0.5000
+
+[FINAL] Weight Stats:
+  Q_TR (Core): 32.8712
+  Q_BR (Synergy): 5.4106
+  Q_BL (Capacity): 0.0000
+  Q_TL (Firewall): 0.000000
+
+======================================================================
+DIAGNOSIS:
+======================================================================
+[OK] Gates are OPEN (mean open prob = 0.5000)
+[!] Q_BR (Synergy) gradients are DEAD (0.00e+00)
+    -> Signal not flowing from Old to New
+[OK] Embedding New has signal (2.5115)
+[!] LM Head new columns are nearly ZERO (0.0000)
+    -> Head cannot READ from new dimensions
+======================================================================

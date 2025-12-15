@@ -1,0 +1,24 @@
+Training Task A...
+Task A accuracy: 100.0%
+
+Expanding...
+Expanding DGE Model: d_model 64 -> 96 (Heads: 4 -> 6) (Router: mlp) [Rescue: True, Ortho: False, BlockDiag: False, Policy: full, Threshold: 0.0]
+Expanding Layer 0...
+Expanding Layer 1...
+Expansion Complete.
+Post-expansion Task A: 100.0%
+
+Training with Experience Replay...
+
+After Replay Training:
+  Task A: 61.2%
+  Task B: 40.1%
+
+============================================================
+GATE ACTIVATION ANALYSIS
+============================================================
+New dims gate (Task A input): 0.6500
+New dims gate (Task B input): 0.6454
+Difference: 0.0047
+
+ISSUE: Gates NOT specializing - same values for both tasks

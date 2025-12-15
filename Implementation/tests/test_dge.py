@@ -15,31 +15,31 @@ class TestDGELinear(unittest.TestCase):
         torch.manual_seed(42)
 
     def test_initialization(self):
-        # Base model initialization (no dynamic gates yet)
+        # Base model initialization
         layer = MoEGatedLinear(10, 5)
         self.assertEqual(layer.weight.shape, (5, 10))
         # Initial mask is all ones (active)
         self.assertTrue(torch.all(layer.active_mask == 1.0))
         
-        # Gates are None by default in Base Model (Identity behavior)
-        self.assertIsNone(layer.gate_row)
-        self.assertIsNone(layer.gate_col)
+        # V 0.3.0: Gates are HybridGate instances (all static, no router since new_count=0)
+        self.assertIsInstance(layer.gate_row, HybridGate)
+        self.assertIsInstance(layer.gate_col, HybridGate)
 
     def test_hybrid_gate_behavior(self):
         # Test the HybridGate logic independently
-        # Input dim 4, Old count 2 (Static), New count 2 (Dynamic)
         # Input dim 8, Old count 4 (Static), New count 4 (Dynamic)
-        gate = HybridGate(input_dim=8, old_count=4, new_count=4)
+        # V 0.3.0: Use explicit router_init_bias=-4.0 to test closed gate behavior
+        gate = HybridGate(input_dim=8, old_count=4, new_count=4, router_init_bias=-4.0)
         
         # Check initialization
         # Old part is buffer
         self.assertTrue(torch.all(gate.old_gate == 1.0))
         # New part is router
         self.assertIsNotNone(gate.router)
-        self.assertTrue(torch.all(gate.router.bias == -4.0), "Closed init (-4.0 in V 0.2.7)") # Closed init
+        self.assertTrue(torch.all(gate.router.bias == -4.0), "Closed init (-4.0 explicitly set)")
         
         # Forward Pass
-        x = torch.randn(1, 1, 8) # Input dim matches gate's input_dim
+        x = torch.randn(1, 1, 8)
         output = gate(x)
         
         # Check shape: [1, 1, 8]
@@ -48,8 +48,7 @@ class TestDGELinear(unittest.TestCase):
         # Check Old Part (Indices 0,1,2,3) -> Should be exactly 1.0
         self.assertTrue(torch.all(output[..., :4] == 1.0))
         
-        # Check New Part (Indices 4,5,6,7) -> Should be sigmoid(-4 + noise) approx 0
-        # With small input, it should be close to sigmoid(-4) ~ 0.018
+        # Check New Part (Indices 4,5,6,7) -> Should be sigmoid(-4 + noise) approx 0.018
         self.assertTrue(torch.all(output[..., 4:] < 0.1))
 
     def test_forward_pass_base(self):
@@ -104,61 +103,66 @@ class TestDGELinear(unittest.TestCase):
              layer.weight.fill_(1.0)
              layer.bias.fill_(0.5)
              
-        # Mock quadrant usage via explicit args (utils no longer uses Quadrant Enum for logic, just simple expansion)
-        # New util assumes Top-Left is always the old core.
+        # Expand with default Directed Synergy settings
         expanded = expand_dge_linear(layer, added_in=2, added_out=2)
         
         self.assertEqual(expanded.weight.shape, (4, 4))
         
-        # Check Top-Left is original
+        # Check Top-Left is original (Core, Q_TR in layout terms)
         self.assertTrue(torch.all(expanded.weight[0:2, 0:2] == 1.0))
         self.assertTrue(torch.all(expanded.bias[0:2] == 0.5))
         
-        # Check Mask: TL should be 0 (frozen), others 1
+        # Check Mask: V 0.3.0 Directed Synergy layout
+        # Core (TL in weight matrix = Q_TR): Frozen
         self.assertTrue(torch.all(expanded.backward_mask[0:2, 0:2] == 0.0))
-        self.assertTrue(torch.all(expanded.backward_mask[2:, :] == 1.0)) # Bottom rows
-        self.assertTrue(torch.all(expanded.backward_mask[:, 2:] == 1.0)) # Right cols
+        # Firewall (TR in weight matrix = Q_TL): Also Frozen for V 0.3.0
+        self.assertTrue(torch.all(expanded.backward_mask[0:2, 2:4] == 0.0))
+        # Synergy (BL in weight matrix = Q_BR): Trainable
+        self.assertTrue(torch.all(expanded.backward_mask[2:4, 0:2] == 1.0))
+        # Capacity (BR in weight matrix = Q_BL): Trainable
+        self.assertTrue(torch.all(expanded.backward_mask[2:4, 2:4] == 1.0))
         
-        # Check Router Bias (Should be -4.0 now)
-        self.assertTrue(torch.all(expanded.gate_row.router.bias == -4.0))
-        self.assertTrue(torch.all(expanded.gate_col.router.bias == -4.0))
+        # V 0.3.0: Router Bias should be 0.0 (Open Gates for Directed Synergy)
+        self.assertTrue(torch.allclose(expanded.gate_row.router.bias, torch.zeros_like(expanded.gate_row.router.bias)),
+                       "V 0.3.0: Router bias should be 0.0 (Open Gates)")
+        self.assertTrue(torch.allclose(expanded.gate_col.router.bias, torch.zeros_like(expanded.gate_col.router.bias)),
+                       "V 0.3.0: Router bias should be 0.0 (Open Gates)")
         
-        # Check New weights (Top-Right, Bottom-Left, Bottom-Right)
-        # V 0.2.7: Noise Init (std=0.001), so they are NOT exactly 0.0 anymore.
-        # But they should be very small.
-        self.assertTrue(torch.all(torch.abs(expanded.weight[0:2, 2:4]) < 0.01)) # Top-Right
-        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 0:2]) < 0.01)) # Bottom-Left
-        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 2:4]) < 0.01)) # Bottom-Right cols
+        # Check Firewall (Q_TL) is zero-initialized
+        self.assertTrue(torch.all(expanded.weight[0:2, 2:4] == 0.0), "Firewall must be zero-initialized")
+        
+        # Check New weights (other quadrants should have small noise)
+        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, :]) < 0.1))  # Bottom half
         
         # Check HybridGate Creation
         self.assertIsInstance(expanded.gate_row, HybridGate)
         self.assertEqual(expanded.gate_row.old_count, 2)
         self.assertEqual(expanded.gate_row.new_count, 2)
         
-        # Check Router Init (Closed) - All elements should be -4.0
-        self.assertTrue(torch.all(expanded.gate_row.router.bias == -4.0))
-        
     def test_expansion_zero_init(self):
         """
-        CRITICAL TEST: Verifies that new physical weights are initialized to 0.0.
-        This is required for Identity Preservation in additive gating.
+        CRITICAL TEST: Verifies V 0.3.0 initialization policies:
+        - Core (TL): Preserved from original
+        - Firewall (TR): EXACTLY 0.0 (zero-initialized)
+        - Synergy (BL) and Capacity (BR): Small noise (std=0.02)
         """
         layer = MoEGatedLinear(2, 2)
         with torch.no_grad():
-             layer.weight.fill_(1.0) # Old weights are 1.0
+             layer.weight.fill_(1.0)  # Old weights are 1.0
              
         expanded = expand_dge_linear(layer, added_in=2, added_out=2)
         
-        # 1. Old core (TL) should be 1.0
+        # 1. Old core (TL) should be exactly 1.0
         self.assertTrue(torch.all(expanded.weight[0:2, 0:2] == 1.0))
         
-        # 2. New areas should be approximately 0.0 (Noise Init)
-        # TR (Old Rows, New Cols)
-        self.assertTrue(torch.all(torch.abs(expanded.weight[0:2, 2:4]) < 0.01))
-        # BL (New Rows, Old Cols)
-        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 0:2]) < 0.01))
-        # BR (New Rows, New Cols)
-        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 2:4]) < 0.01))
+        # 2. Firewall (TR = Old Rows, New Cols) should be EXACTLY 0.0
+        self.assertTrue(torch.all(expanded.weight[0:2, 2:4] == 0.0),
+                       "Firewall must be exactly 0.0 (zero-initialized)")
+        
+        # 3. Synergy (BL = New Rows, Old Cols) and Capacity (BR) have noise init
+        # With std=0.02, most values should be < 0.1
+        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 0:2]) < 0.1))
+        self.assertTrue(torch.all(torch.abs(expanded.weight[2:4, 2:4]) < 0.1))
         
     def test_frozen_integrity_adamw(self):
         """
@@ -330,5 +334,136 @@ class TestDGELinear(unittest.TestCase):
         # Should now be 0.0 because of the hook
         self.assertEqual(grad_norm, 0.0, f"Embedding Leak Detected! Norm: {grad_norm}")
 
+
+class TestDirectedSynergy(unittest.TestCase):
+    """
+    Tests for Directed Synergy components (V 0.3.0+):
+    - QuadrantInitConfig
+    - ExperienceReplayPenalty
+    - Router init bias = 0.0 (Open Gates)
+    - Firewall zero initialization
+    """
+    
+    def setUp(self):
+        torch.manual_seed(42)
+        
+    def test_quadrant_init_config_defaults(self):
+        """Verify QuadrantInitConfig has correct default values."""
+        from dge_utils import QuadrantInitConfig
+        
+        config = QuadrantInitConfig()
+        
+        # Q_TR (Core): Frozen
+        self.assertTrue(config.q_tr_frozen)
+        
+        # Q_BR (Synergy): Trainable with noise
+        self.assertEqual(config.q_br_init_std, 0.02)
+        self.assertTrue(config.q_br_trainable)
+        
+        # Q_BL (Capacity): Trainable with noise
+        self.assertEqual(config.q_bl_init_std, 0.02)
+        self.assertTrue(config.q_bl_trainable)
+        
+        # Q_TL (Firewall): Zero init, frozen
+        self.assertTrue(config.q_tl_zero_init)
+        self.assertFalse(config.q_tl_trainable)
+        self.assertFalse(config.q_tl_use_replay)
+        
+    def test_experience_replay_penalty(self):
+        """Test ExperienceReplayPenalty stores reference and computes penalty."""
+        from dge_utils import ExperienceReplayPenalty
+        
+        old_dim = 10
+        penalty = ExperienceReplayPenalty(old_out_dim=old_dim, penalty_weight=0.5)
+        
+        # Initially not initialized
+        self.assertFalse(penalty.is_initialized())
+        
+        # Store reference
+        reference = torch.randn(4, 8, old_dim)  # [B, T, D]
+        penalty.store_reference(reference)
+        self.assertTrue(penalty.is_initialized())
+        
+        # Identical output should have zero penalty
+        identical_output = torch.cat([reference, torch.randn(4, 8, 5)], dim=-1)
+        identical_penalty = penalty.compute_penalty(identical_output)
+        self.assertAlmostEqual(identical_penalty.item(), 0.0, places=5)
+        
+        # Different output should have non-zero penalty
+        different_output = torch.randn(4, 8, old_dim + 5)
+        different_penalty = penalty.compute_penalty(different_output)
+        self.assertGreater(different_penalty.item(), 0.0)
+        
+    def test_router_init_bias_zero_in_expansion(self):
+        """
+        Verify that expand_dge_linear uses router_init_bias=0.0 by default (Open Gates).
+        This is CRITICAL for Directed Synergy to prevent Dead Sidecar.
+        """
+        layer = MoEGatedLinear(4, 4)
+        
+        # Expand with default settings
+        expanded = expand_dge_linear(layer, added_in=4, added_out=4)
+        
+        # Check that router bias is 0.0 (Open Gate)
+        # The router is an MLP, so check the last layer's bias
+        if hasattr(expanded.gate_row.router, 'bias'):
+            # Linear router
+            self.assertTrue(torch.allclose(expanded.gate_row.router.bias, torch.zeros_like(expanded.gate_row.router.bias)),
+                           "Router should have bias=0.0 for Open Gates (Directed Synergy)")
+        elif hasattr(expanded.gate_row.router, '__getitem__'):
+            # Sequential MLP router - check last layer
+            last_layer = expanded.gate_row.router[-1]
+            self.assertTrue(torch.allclose(last_layer.bias, torch.zeros_like(last_layer.bias)),
+                           "MLP Router should have bias=0.0 for Open Gates")
+    
+    def test_firewall_zero_initialization(self):
+        """
+        Verify that Q_TL (New Input -> Old Output) is zero-initialized.
+        This is the FIREWALL that prevents interference.
+        """
+        layer = MoEGatedLinear(4, 4)
+        with torch.no_grad():
+            layer.weight.fill_(1.0)  # Old weights are 1.0
+            
+        expanded = expand_dge_linear(layer, added_in=4, added_out=4)
+        
+        # Q_TL is the top-right quadrant: Old Rows [:4], New Cols [4:]
+        # In the weight matrix [out, in], this is weight[:old_out, old_in:]
+        firewall_block = expanded.weight[:4, 4:]
+        
+        # Should be exactly 0.0
+        self.assertTrue(torch.all(firewall_block == 0.0),
+                       f"Firewall (Q_TL) should be zero-initialized! Max: {firewall_block.abs().max().item()}")
+        
+    def test_firewall_gradient_frozen(self):
+        """
+        Verify that Q_TL gradients are masked (frozen) to prevent leakage.
+        """
+        layer = MoEGatedLinear(4, 4)
+        expanded = expand_dge_linear(layer, added_in=4, added_out=4)
+        
+        # Check backward mask for Q_TL quadrant
+        # Q_TL: rows [:4], cols [4:] should have mask = 0.0
+        mask_qtl = expanded.backward_mask[:4, 4:]
+        
+        self.assertTrue(torch.all(mask_qtl == 0.0),
+                       "Firewall (Q_TL) should have backward_mask=0.0 (frozen)")
+        
+    def test_synergy_channel_open(self):
+        """
+        Verify that Q_BR (Old Input -> New Output) is trainable (mask=1.0).
+        This is the SYNERGY channel that allows knowledge transfer.
+        """
+        layer = MoEGatedLinear(4, 4)
+        expanded = expand_dge_linear(layer, added_in=4, added_out=4)
+        
+        # Q_BR: new rows [4:], old cols [:4]
+        mask_qbr = expanded.backward_mask[4:, :4]
+        
+        self.assertTrue(torch.all(mask_qbr == 1.0),
+                       "Synergy (Q_BR) should have backward_mask=1.0 (trainable)")
+
+
 if __name__ == '__main__':
     unittest.main()
+

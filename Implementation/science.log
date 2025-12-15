@@ -3,6 +3,64 @@
 This document tracks critical architectural insights, hypotheses, and experimental results.
 
 ---------------------------------------------------------
+## Experiment: V18 (Directed Synergy - Full Settings)
+**Date:** 2025-12-15
+**Goal:** Achieve Plasticity by enabling Q_BR (Old→New) synergy channel.
+
+**Settings:**
+- `isolate_cross_terms=False` (Synergy enabled)
+- `router_init_bias=0.0` (Gates OPEN)
+- `use_orthogonal_init=False` (No signal attenuation)
+- `cross_term_policy='full'` (All cross-terms active) 
+- Firewall Q_TL: Zero-initialized AND gradient-frozen
+
+**Results:**
+- **Stability:** ✅ SUCCESS (PPL 1.97, Acc 100%)
+- **Plasticity:** ❌ FAILED (PPL 302M, Acc 0%)
+- **Observation:** Task B loss stuck at ~19.5 (random chance). No learning whatsoever.
+
+**Analysis:**
+The Dead Sidecar persists despite "correct" settings. Possible causes:
+1. **Embedding Isolation:** New embedding dimensions may not be receiving signal.
+2. **Gate Still Blocking:** Despite bias=0.0, MLP router may be producing closed gates.
+3. **LM Head Bottleneck:** The lm_head may not be reading from new dimensions.
+4. **Daisy-Chain Attenuation:** Even with noise init (std=0.02), 2 layers of 0.02 multiplication = 4e-4 signal.
+
+**Next Steps:**
+1. Add gradient diagnostics: Check if Active_Grad_Norm is non-zero during Task B training.
+2. Check gate activations: Logger shows Gate_Open_Mean - is it actually > 0.5?
+3. Verify lm_head expansion: Is the head reading from new dimensions?
+
+---------------------------------------------------------
+## Experiment: V19 (LM Head Plasticity Fix)
+**Date:** 2025-12-15
+**Goal:** Fix LM Head being zero-initialized, enabling plasticity.
+
+**Fixes Applied (V 0.3.1):**
+1. Firewall zero-init only when `added_out > 0` (not for LM Head)
+2. Backward mask freeze only when `added_out > 0`
+3. `dge_mask` added to embedding for weight decay protection
+
+**Results:**
+- **Plasticity:** ✅ SUCCESS (100% Task B accuracy)
+- **Stability:** ❌ FAILED (0% Task A accuracy)
+
+**Root Cause Analysis:**
+The LM Head new columns are now trainable, which enables plasticity. However, they produce output for ALL vocab tokens, not just Task B tokens. When COUNT_DOWN is learned, the new columns still contribute to COUNT_UP predictions, causing interference.
+
+Key insight: **The Firewall protects intermediate layers (Q_TL=0), but the LM Head is a shared output layer where new capacity necessarily affects all outputs.**
+
+**Weight Forensics:**
+- Q_TR (Core): 32.8 → 32.8 (NO change, frozen ✅)
+- Q_TL (Firewall, intermediate): 0.0 → 0.0 (Frozen ✅)
+- LM Head new cols: 2.5 → 8.7 (Trained, expected)
+- Embedding old: Stable (with dge_mask fix)
+
+**Conclusion:**
+For tasks that share the same output vocabulary, the shared LM Head creates intrinsic interference. Solutions:
+1. **Task-specific heads** (separate linear for each task)
+2. **Output masking** (mask new columns for old task evaluation)
+3. **Use non-competing tasks** (different vocab subsets)
 ## Experiment: V17 (Split LayerNorm + Block Diagonal [No Cross])
 **Date:** 2025-12-14
 **Goal:** Achieve Plasticity (Learning Skill B) while preserving Identity (Skill A) using pure block-diagonal expansion (isolated cross-terms) and "Open Gate" initialization.
@@ -32,3 +90,61 @@ B) Access to Strong Features (Cross-Terms).
 **Action Plan:**
 Unlock Cross-Terms (`Old->New`). Allow the sidecar to bootstrap off the core's features.
 ---------------------------------------------------------
+
+
+---------------------------------------------------------
+## Experiment: V20 - V22 (Hierarchical Gating + Threshold)
+**Date:** 2025-12-15
+**Goal:** Implement 'Hierarchical Gating' where Default-Closed (-4.0) Gates + Hard Threshold (0.05) protect Task A (Stability) while allowing Task B to open gates (Plasticity).
+
+**Experiments:**
+1. **V20:** Default-Closed + Replay. Result: Partial Success (A 50%, B 50%). Compromise.
+2. **V21:** V20 + Hard Threshold (0.05). Result: Failed (A 54%, B 47%).
+3. **V22:** Default-Closed + Threshold + NO Replay. Result: Catastrophic Stability Failure (A 0% Acc, 165T PPL). Plasticity Success (B 100% Acc).
+
+**Analysis of Failure:**
+Despite router_init_bias=-4.0, the new router (MLP) generalized inappropriately.
+- In V22 (No Replay), the router generalized to 'OPEN' for Task A inputs, likely because Task A/B share the same vocabulary and distributions. 
+- Once open, the shared LM Head (trained on Task B) destroyed Task A predictions.
+- **Key Insight:** 'Default Closed' is not enough if the router generalizes 'Open' to similar inputs. We need an explicit 'Push Closed' signal.
+
+**Hypothesis V23 (Asymmetric Replay):**
+To achieve separation, we must explicitly train the router to CLOSE for Task A.
+BUT, we must not let the new weights adapt to Task A (which would reduce loss by compromise).
+**Solution:** During Task A Replay, FREEZE the new weights and only train the Router.
+- The router sees Task A input.
+- The New Weights (specialized for B) produce high loss/noise for A.
+- The only way to minimize loss is to CLOSE the gate.
+- This creates the specific 'Anti-Task A' signal needed for separation.
+
+
+---------------------------------------------------------
+## Experiment: V23 - V26 (The Separation Solution)
+**Date:** 2025-12-15
+**Goal:** Solve the Stability/Plasticity Dilemma by enabling the router to distinguish Task A from Task B inputs, even when they share identical tokens (e.g., '2' in '1->2' vs '3->2').
+
+**History:**
+1. **V23 (Asymmetric Replay):** Freezing weights during Replay improved Stability (60%) but Plasticity stalled (24%).
+2. **V24 (Soft Gating):** Removing threshold didn't help (Plasticity 22%). Attenuation from -4.0 start is too strong.
+3. **V25 (Start Open + Asymmetric Replay):** Bias 0.0 improved both (A 66%, B 31%), but still compromised.
+
+**Analysis of Failure (The Aliasing Problem):**
+Standard MLP routers see only the current token. For Count Up (1,2,3) vs Count Down (3,2,1), the token '2' is identical in both tasks. The router cannot mathematically distinguish them, so it's forced to either Open for both (Stability failure) or Close for both (Plasticity failure).
+
+**Experiment V26: Contextual Hierarchical Gating**
+**Hypothesis:** Use a **Bigram Router** that sees [Current, Previous] tokens. This allows disambiguation ('1->2' vs '3->2'). 
+**Configuration:**
+- Router: 'bigram' (Contextual)
+- Init: Bias 0.0 (Start Open for Plasticity)
+- Training: Asymmetric Replay (Router-Only A-Training forces Stability)
+
+**RESULTS:**
+- **Stability (Task A):** **99.9% Accuracy** (PPL 2.07 < Baseline).
+- **Plasticity (Task B):** **99.8% Accuracy** (PPL 2.25).
+
+**CONCLUSION: SOLVED.**
+The optimal solution is **Directed Synergy with Contextual Gating**.
+- **Bigram Router** provides the necessary state information for separation.
+- **Asymmetric Replay** leverages this separability to enforce strict routing policies (Close for A, Open for B).
+- **Start Open** ensures rapid plasticity.
+

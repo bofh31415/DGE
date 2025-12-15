@@ -532,9 +532,9 @@ class DGELab:
             print("\n🧪 Running V21 RBF Verification...")
             run_v21_rbf.run_experiment()
         elif choice == '18':
-            import run_synergy_experiment
-            print("\n🟢 Running Directed Synergy Experiment...")
-            run_synergy_experiment.run_synergy_experiment()
+            import run_seed_fund_experiment
+            print("\n🟢 Running Directed Synergy Verification (V26 Success)...")
+            run_seed_fund_experiment.run_seed_fund_experiment()
         else:
             print(f"❌ Unknown experiment choice: '{choice}'")
             print("Available experiments: 1, 2, 17, 18")

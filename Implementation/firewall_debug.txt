@@ -1,0 +1,28 @@
+Expanding DGE Model: d_model 64 -> 96 (Heads: 4 -> 6) (Router: mlp) [Rescue: True, Ortho: False, BlockDiag: False, Policy: full, Threshold: 0.0]
+Expanding Layer 0...
+Expanding Layer 1...
+Expansion Complete.
+============================================================
+CHECKING FIREWALL INITIALIZATION
+============================================================
+
+Layer 0 w_q:
+  Weight shape: torch.Size([96, 96])
+  Mask shape: torch.Size([96, 96])
+  Q_TL shape: torch.Size([64, 32])
+  Q_TL norm: 0.000000
+  Q_TL max: 0.000000
+  Q_TL should be: 0.0 (Firewall)
+  Q_TL mask: [0.0]
+
+LM Head:
+  Weight shape: torch.Size([500, 96])
+  New Columns shape: torch.Size([500, 32])
+  New Columns norm: 2.516044
+  New Columns should be: NON-ZERO (Trainable for Plasticity)
+  New Cols mask unique: [1.0]
+
+============================================================
+OK: Intermediate layer Q_TL is properly zeroed
+OK: LM Head new columns are trainable (non-zero)
+============================================================

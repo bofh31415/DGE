@@ -1,0 +1,32 @@
+Training Task A...
+Task A accuracy before expansion: 100.0%
+
+Expanding...
+Expanding DGE Model: d_model 64 -> 96 (Heads: 4 -> 6) (Router: mlp) [Rescue: True, Ortho: False, BlockDiag: False, Policy: full, Threshold: 0.0]
+Expanding Layer 0...
+Expanding Layer 1...
+Expansion Complete.
+Task A accuracy after expansion: 100.0%
+
+Training Task B...
+Step 0: Task A accuracy = 100.0%
+Step 50: Task A accuracy = 55.3%
+Step 100: Task A accuracy = 0.0%
+Step 150: Task A accuracy = 0.0%
+
+============================================================
+WEIGHT CHANGE ANALYSIS
+============================================================
+Q_TR (Core) change: 0.012535
+  -> Should be 0.0 (frozen)
+Q_TL (Firewall) norm: 0.000000
+  -> Should be 0.0 (zeroed and frozen)
+Q_BR (Synergy) change: 1.964709
+  -> Should be > 0 (trainable)
+Embedding old dims change: 0.358175
+  -> Should be 0.0 (frozen)
+LM Head old cols change: 0.032303
+  -> Should be 0.0 (frozen)
+LM Head new cols norm: 8.462564
+  -> Should be > 0 (trainable)
+============================================================

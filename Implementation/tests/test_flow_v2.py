@@ -45,7 +45,7 @@ class TestExperimentChainV2(unittest.TestCase):
         self.assertEqual(self.lab.model.d_model, 80)
         # Check if router is MLP
         # Access a gate to verify
-        layer = self.lab.model.layers[0].w_qkv # MoEGatedLinear
+        layer = self.lab.model.layers[0].w_q  # V12+: Separate Q, K, V layers
         # Check router type attribute if accessible, or structure
         self.assertEqual(layer.router_type, 'mlp')
         self.assertIsInstance(layer.gate_row.router, torch.nn.Sequential)
