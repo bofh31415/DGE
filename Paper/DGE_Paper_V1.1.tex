@@ -123,6 +123,36 @@ When expanding a linear layer $W \in \mathbb{R}^{n \times k}$ to $W' \in \mathbb
 \end{equation}
 This mathematically guarantees \textbf{Identity Preservation} at initialization ($t=0$). The gate can learn to open later only if it reduces loss, but it starts as a perfect firewall.
 
+\subsection{Latent Trainability: Resolving the Gradient Paradox}
+
+A closed gate ($G_{fwd} \approx 0$) appears to freeze its associated weights, since:
+\begin{equation}
+    \nabla W = \frac{\partial \mathcal{L}}{\partial y} \cdot G_{fwd} \cdot x \approx 0
+\end{equation}
+This creates an apparent paradox: how can a weight be "trainable" if its gradient is zero?
+
+\textbf{Resolution:} We distinguish between \textbf{Weight Gradients} and \textbf{Gate Gradients}:
+
+\begin{enumerate}
+    \item \textbf{Weight ($W$)}: If $G_{fwd} \approx 0$, then $\nabla W \approx 0$. The weight is effectively \textbf{frozen}.
+    
+    \item \textbf{Gate ($G$)}: The Gate's gradient is computed independently:
+    \begin{equation}
+        \nabla G = \frac{\partial \mathcal{L}}{\partial y} \cdot W \cdot x
+    \end{equation}
+    If $W \neq 0$ (e.g., noise-initialized for $Q_{BR}$, $Q_{BL}$), then $\nabla G \neq 0$, allowing the gate to learn.
+\end{enumerate}
+
+\textbf{The Rescue Mechanism} (applied only to Gates):
+\begin{equation}
+    \nabla G \leftarrow \nabla G \times \text{RescueScale}
+\end{equation}
+where RescueScale $\approx 10^4$ compensates for the suppressed gradient magnitude.
+
+\textbf{Key Insight:} "If the Gate is closed, the Weight is dead. But the Gate is \textit{alive and searching}. When Rescue boosts the Gate open ($G_{fwd} > 0$), the Weight begins to receive gradients and learns."
+
+This clarifies that \textbf{Latent Trainability} refers to the Gate's ability to activate dormant weights, not to the weights themselves being trainable while silent.
+
 \section{The Failure of Gradient Rescue (V6)}
 
 Prior to Directed Synergy, we attempted to use "Gradient Rescue" to force gates open. This failed due to the "Double Zero" problem.
