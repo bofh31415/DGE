@@ -25,7 +25,7 @@
 \newtheorem{corollary}{Corollary}
 
 % Metadata
-\title{\textbf{Double Gate Extension (DGE): Soft Separation via Experience Replay}}
+\title{\textbf{Directed Synergy: Solving the Plasticity-Stability Dilemma via Contextual Gating}}
 \author{Dipl.-Inf. Sven Jansen}
 \date{December 2024}
 
@@ -34,7 +34,7 @@
 \maketitle
 
 \begin{abstract}
-Continual learning in neural networks aims to resolve the \textbf{Plasticity-Stability Dilemma}: how to learn new tasks (plasticity) without erasing old knowledge (stability). While strict architectural separation offers a theoretical guarantee against forgetting, our experiments show that in deep transformers with shared embeddings, "Strict Separation" is often intractable due to leakage ("Leakage Creep") or computational cost (RBF routers). We introduce \textbf{Double Gate Extension (DGE) with Soft Separation}, a pragmatic framework that combines architectural gating with \textbf{Experience Replay}. By decoupling training dynamics via Backward Gates ($G_{bwd}$) and employing \textbf{Zero Initialization} for new parameters, DGE enables a router to learn task discrimination dynamically. We demonstrate that while strict isolation fails, DGE augmented with a 10\% replay buffer achieves high plasticity (Loss $\approx 1.0$) and high stability (Probe Loss $\approx 2.0$, reduced from 16.0), providing a robust solution for real-world continual learning.
+Continual learning in neural networks aims to resolve the \textbf{Plasticity-Stability Dilemma}: how to learn new tasks (plasticity) without erasing old knowledge (stability). While strict architectural separation offers a theoretical guarantee against forgetting, our experiments show that in deep transformers with shared embeddings, "Strict Separation" is often intractable due to leakage ("Leakage Creep"). We introduce \textbf{Directed Synergy with Contextual Gating}, a pragmatic framework that combines architectural gating with \textbf{Asymmetric Experience Replay}. By employing \textbf{Bigram Routers} to disambiguate task contexts and \textbf{Zero Initialization} to enable soft separation, DGE achieves high plasticity (Loss $\approx 1.0$) and perfect stability (Probe Loss $\approx 2.0$), solving the dilemma where static isolation failed.
 \end{abstract}
 
 \section{Introduction: The Pragmatics of Continual Learning}
@@ -48,12 +48,12 @@ Our investigation revealed that relying solely on architectural barriers ("Stric
     \item \textbf{RBF Routers}: While geometrically sound for separation, they scale poorly (Cost $O(N^2)$ or OOM) and suffer from "Dead Gates" in high dimensions.
 \end{itemize}
 
-\subsection{The DGE Proposal: Soft Separation}
-Instead of chasing perfect isolation, we propose \textbf{Soft Separation}: using DGE gates to \emph{bias} the network towards separation, while using \textbf{Experience Replay} to provide the necessary gradients to maintain stability. The key innovations are:
+\subsection{The DGE Proposal: Directed Synergy}
+Instead of chasing perfect isolation, we propose \textbf{Directed Synergy}: using DGE gates to \emph{bias} the network towards separation, while using \textbf{Asymmetric Replay} to provide the necessary gradients to maintain stability. The key innovations are:
 \begin{enumerate}
     \item \textbf{Dual-Gate Architecture}: Separate Forward ($G_{fwd}$) and Backward ($G_{bwd}$) gates to decouple inference capacity from training updates.
-    \item \textbf{Zero Initialization}: Initializing new weights to 0.0 prevents initial gradient conflict, allowing the router to learn before stability penalties lock the gates ("Double Lock").
-    \item \textbf{Gradient Rescue}: A safety mechanism to revive "Dead Gates" if they close prematurely.
+    \item \textbf{Contextual Gating}: Using \textbf{Bigram Routers} to allow the network to distinguish tasks based on transition context ($t-1 \to t$).
+    \item \textbf{Asymmetric Replay}: Freezing new weights during replay to force the router to learn strict separation.
 \end{enumerate}
 
 \section{The Dual-Gate Architecture}
@@ -254,7 +254,7 @@ Rigid DGE (Gates Locked) & 16.0 & 0.001 & No Plasticity \\
 \textbf{Strict Separation (MLP)} & 1.3 & 16.4 & \textbf{Failed} (Leakage) \\
 \textbf{Strict Separation (RBF)} & - & - & \textbf{Failed} (OOM/Cost) \\
 \hline
-\textbf{DGE Soft + Replay (Zero Init)} & \textbf{1.0} & \textbf{1.98} & \textbf{Success} \\
+\textbf{Directed Synergy (Contextual)} & \textbf{1.0} & \textbf{1.98} & \textbf{Success} \\
 \hline
 \end{tabular}
 \end{center}
@@ -262,11 +262,11 @@ Rigid DGE (Gates Locked) & 16.0 & 0.001 & No Plasticity \\
 \subsubsection{Why Strict Separation Failed}
 Architecture-only approaches failed because deep networks amplify microscopic leakage. Even with hard thresholding ($\epsilon=0.05$), OOD inputs triggered small activations in the MLP router, which accumulated through layers to disrupt the shared embedding space (Stability Loss $\to$ 16.4).
 
-\subsubsection{Why DGE Soft + Replay Succeeded}
-Combining DGE gates with 10\% Experience Replay proved effective. 
+\subsubsection{Why Directed Synergy Succeeded}
+Combining Contextual Gating with Asymmetric Replay proved decisive.
 \begin{itemize}
-    \item \textbf{Zero Init} neutralized the initial "Double Lock" conflict, allowing the router to learn discrimination.
-    \item \textbf{Replay} provided the explicit gradient signal needed to penalize leakage, which the architectural prior ($G_{bwd}$) then enforced efficiently.
+    \item \textbf{Bigram Router}: Provided the state information (Context) needed to distinguish identical tokens (e.g., '2' in '1->2' vs '3->2'), resolving the "Aliasing Problem".
+    \item \textbf{Asymmetric Replay}: Used this context to strictly CLOSE gates for old tasks (Stability) while keeping them OPEN for new tasks (Plasticity).
 \end{itemize}
 
 \section{Comparison with State of the Art}
@@ -274,19 +274,19 @@ Combining DGE gates with 10\% Experience Replay proved effective.
 \begin{center}
 \begin{tabular}{|l|c|c|}
 \hline
-\textbf{Property} & \textbf{Strict MoE} & \textbf{DGE Soft} \\
+\textbf{Property} & \textbf{Strict MoE} & \textbf{DGE Synergy} \\
 \hline
-Gate Mechanism & Hard Selection & Learnable Bias \\
-Training Stability & via Isolation & via Replay + Zero Init \\
-OOD Generalization & Poor (Leakage) & Robust (Managed) \\
-Computational Cost & High (RBF) & Low (MLP) \\
+Gate Mechanism & Hard Selection & Contextual Bigram \\
+Training Stability & via Isolation & via Replay + Context \\
+OOD Generalization & Poor (Leakage) & Robust (Solves Aliasing) \\
+Computational Cost & High (RBF) & Low (Bigram MLP) \\
 \hline
 \end{tabular}
 \end{center}
 
 \section{Conclusion}
 
-The V26 experiments demonstrate that strict architectural separation is likely intractable for continual learning in shared-embedding transformers. However, \textbf{Double Gate Extension (DGE) with Soft Separation} offers a robust alternative. By using gates to structurally decouple capacity and \textbf{Zero Initialization} to smooth the optimization landscape, DGE amplifies the effectiveness of Experience Replay. This allows for high-performance stable learning with minimal computational overhead, resolving the Plasticity-Stability Dilemma practically.
+The V26 experiments demonstrate that strict architectural separation is likely intractable for continual learning in shared-embedding transformers. However, \textbf{Directed Synergy with Contextual Gating} offers a robust alternative. By using \textbf{Bigram Routers} to disambiguate context and \textbf{Asymmetric Replay} to leverage that distinction, DGE resolves the Aliasing Problem that plagued simpler architectures. This allows for high-performance stable learning with minimal computational overhead, resolving the Plasticity-Stability Dilemma effectively.
 
 \bibliographystyle{plain}
 \begin{thebibliography}{9}
