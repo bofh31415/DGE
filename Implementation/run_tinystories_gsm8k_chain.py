@@ -491,46 +491,6 @@ def run_experiment():
         print("      Set with: export HF_TOKEN=hf_your_token")
         experiment_log["hf_upload"] = {"status": "skipped", "reason": "HF_TOKEN not set"}
     
-    # ========================================================================
-    # PHASE 10: Git Push Logs (Backup)
-    # ========================================================================
-    print("\n" + "=" * 70)
-    print("📝 PHASE 10: Git Push Logs (Backup)")
-    print("=" * 70)
-    
-    try:
-        import subprocess
-        
-        # Only push small files (JSON, configs)
-        subprocess.run(["git", "add", 
-                       f"{CONFIG['output_dir']}/experiment_results.json",
-                       f"{CONFIG['output_dir']}/*/config.json"],
-                      capture_output=True, cwd=os.path.dirname(__file__))
-        
-        result = subprocess.run(
-            ["git", "commit", "-m", f"Experiment results: {datetime.now().isoformat()}"],
-            capture_output=True, text=True, cwd=os.path.dirname(__file__)
-        )
-        
-        if result.returncode == 0:
-            push_result = subprocess.run(
-                ["git", "push", "origin", "master"],
-                capture_output=True, text=True, cwd=os.path.dirname(__file__)
-            )
-            if push_result.returncode == 0:
-                print("   ✅ Logs pushed to GitHub")
-                experiment_log["git_push"] = {"status": "success"}
-            else:
-                print(f"   ⚠️ Git push failed: {push_result.stderr}")
-                experiment_log["git_push"] = {"status": "failed", "error": push_result.stderr}
-        else:
-            print(f"   ℹ️ Nothing to commit or commit failed")
-            experiment_log["git_push"] = {"status": "no_changes"}
-            
-    except Exception as e:
-        print(f"   ⚠️ Git operations failed: {e}")
-        experiment_log["git_push"] = {"status": "error", "error": str(e)}
-    
     # Save final log with upload status
     with open(results_path, "w") as f:
         json.dump(experiment_log, f, indent=2)
@@ -538,10 +498,13 @@ def run_experiment():
     print("\n" + "=" * 70)
     print("🎉 ALL PHASES COMPLETE!")
     print("=" * 70)
+    print(f"\n📥 Download results with:")
+    print(f"   huggingface-cli download {hf_repo} --local-dir ./results")
     
     return experiment_log
 
 
 if __name__ == "__main__":
     run_experiment()
+
 
