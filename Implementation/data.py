@@ -463,6 +463,69 @@ def load_tinystories(split='train', max_samples=None, seq_len=128, batch_size=32
     return dataloader
 
 
+def load_gsm8k(split='train', max_samples=None, seq_len=256, batch_size=32, 
+               tokenizer_name='gpt2', vocab_size=None, shuffle=True):
+    """
+    Load GSM8K (Grade School Math 8K) dataset from HuggingFace.
+    
+    GSM8K contains math word problems with step-by-step solutions.
+    We concatenate question + answer for language modeling.
+    
+    Args:
+        split: 'train' or 'test' (GSM8K has no validation split).
+        max_samples: Maximum number of samples to load (None for all).
+        seq_len: Sequence length for each sample.
+        batch_size: Batch size for DataLoader.
+        tokenizer_name: HuggingFace tokenizer to use.
+        vocab_size: If set, clamp token IDs to this range.
+        shuffle: Whether to shuffle the data.
+        
+    Returns:
+        PyTorch DataLoader.
+    """
+    if not HF_AVAILABLE:
+        raise ImportError("HuggingFace datasets required. Run: pip install datasets")
+    
+    print(f"🧮 Loading GSM8K ({split})...")
+    dataset = load_dataset("openai/gsm8k", "main", split=split)
+    
+    if max_samples:
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+    
+    # Load tokenizer
+    if TOKENIZER_AVAILABLE and tokenizer_name:
+        print(f"🔤 Loading tokenizer: {tokenizer_name}")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    else:
+        tokenizer = None
+        print("⚠️ Using fallback character-level tokenization")
+    
+    # GSM8K format: combine question and answer
+    # Format: "Question: {question}\nAnswer: {answer}"
+    texts = []
+    for item in dataset:
+        combined = f"Question: {item['question']}\nAnswer: {item['answer']}"
+        texts.append(combined)
+    
+    torch_dataset = TextDataset(texts, tokenizer, seq_len, vocab_size)
+    
+    # Create dataloader
+    dataloader = DataLoader(
+        torch_dataset, 
+        batch_size=batch_size, 
+        shuffle=shuffle,
+        num_workers=0,
+        pin_memory=True
+    )
+    
+    print(f"✅ Loaded {len(torch_dataset)} samples, {len(dataloader)} batches")
+    return dataloader
+
+
+
+
 def load_text_file(filepath, seq_len=128, batch_size=32, vocab_size=1000, shuffle=True):
     """
     Load a plain text file as a dataset.

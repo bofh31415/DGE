@@ -88,11 +88,12 @@ class DGEBlock(nn.Module):
         self.ln2 = expand_layer_norm(self.ln2, added_width)
 
 class DGESimpleTransformer(nn.Module):
-    def __init__(self, vocab_size=1000, d_model=64, n_layer=2, n_head=4):
+    def __init__(self, vocab_size=1000, d_model=64, n_layer=2, n_head=4, max_seq_len=1024):
         super().__init__()
         self.d_model = d_model
+        self.max_seq_len = max_seq_len
         self.token_emb = nn.Embedding(vocab_size, d_model)
-        self.pos_emb = nn.Parameter(torch.zeros(1, 128, d_model)) # Fixed max seq len
+        self.pos_emb = nn.Parameter(torch.zeros(1, max_seq_len, d_model))
         self.layers = nn.ModuleList([DGEBlock(d_model, n_head) for _ in range(n_layer)])
         self.lm_head = MoEGatedLinear(d_model, vocab_size, bias=False)
         

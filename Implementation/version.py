@@ -1,1 +1,1 @@
-__version__ = "V 0.6.1"  # Phase 6: Real Dataset Infrastructure + GPU Support
+__version__ = "V 0.7.0"  # Phase 8: TinyStories -> GSM8K Experiment Chain

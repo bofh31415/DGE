@@ -593,12 +593,18 @@ class DGELab:
             run_replay_ratio_experiment.run_experiment()
         elif choice == '20':
             self._run_tinystories_training()
+        elif choice == '21':
+            import run_tinystories_gsm8k_chain
+            print("\n🔬 Running TinyStories → GSM8K Chain (Paper Experiment)...")
+            run_tinystories_gsm8k_chain.run_experiment()
         else:
             print(f"❌ Unknown experiment choice: '{choice}'")
-            print("Available experiments: 1, 2, 3 (or legacy: 17, 18, 19, 20)")
+            print("Available experiments: 1, 2, 3, 4 (or legacy: 17, 18, 19, 20, 21)")
             print("  1/18: Directed Synergy (V26 - Working Config)")
             print("  2/19: Variable Replay Ratio Sensitivity")
             print("  3/20: TinyStories Training")
+            print("  4/21: TinyStories → GSM8K Chain (Paper Experiment)")
+
 
     def experiment_menu(self):
         while True:
@@ -608,12 +614,13 @@ class DGELab:
             print("1. 🟢 Directed Synergy (V26 - Working Config)")
             print("2. 📉 Variable Replay Ratio Sensitivity (0.01% - 50%)")
             print("3. 📖 Train on TinyStories (HuggingFace)")
+            print("4. 🔬 TinyStories → GSM8K Chain (Paper Experiment)")
             print("b. 🔙 Back")
             print("q. 🚪 Exit")
             
             choice = input("\nSelect Option: ").strip().lower()
             # Remap simplified menu choices to working experiments
-            choice_map = {'1': '18', '2': '19', '3': '20'}
+            choice_map = {'1': '18', '2': '19', '3': '20', '4': '21'}
             choice = choice_map.get(choice, choice)
             
             if choice == '18':
