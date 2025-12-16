@@ -109,15 +109,53 @@ def count_parameters(model):
 _previous_checkpoints = {}
 
 def save_checkpoint(model, optimizer, path, step, config):
-    """Save model checkpoint with config. Deletes previous checkpoint to save disk space."""
+    """Save model checkpoint with config. Deletes previous checkpoint AFTER successful save."""
     import shutil
     
     # Get checkpoint category (e.g., "tinystories_checkpoint", "gsm8k_checkpoint")
     checkpoint_key = os.path.basename(path)
+    prev_path = _previous_checkpoints.get(checkpoint_key)
     
-    # Delete previous checkpoint if exists (but not final models)
-    if checkpoint_key in _previous_checkpoints and "model_" not in checkpoint_key:
-        prev_path = _previous_checkpoints[checkpoint_key]
+    # === SAVE FIRST (before any deletion) ===
+    os.makedirs(path, exist_ok=True)
+    
+    try:
+        # Save weights
+        weights_path = os.path.join(path, "weights.pt")
+        torch.save(model.state_dict(), weights_path)
+        
+        # Save optimizer state
+        optimizer_path = os.path.join(path, "optimizer.pt")
+        torch.save(optimizer.state_dict(), optimizer_path)
+        
+        # Save config
+        checkpoint_config = {
+            "step": step,
+            "d_model": model.d_model,
+            "n_layer": len(model.layers),
+            "n_head": model.layers[0].n_head,
+            "vocab_size": model.token_emb.num_embeddings,
+            "max_seq_len": model.max_seq_len,
+            "timestamp": datetime.now().isoformat(),
+            **config
+        }
+        config_path = os.path.join(path, "config.json")
+        with open(config_path, "w") as f:
+            json.dump(checkpoint_config, f, indent=2)
+        
+        # Verify files exist
+        if not os.path.exists(weights_path) or not os.path.exists(config_path):
+            raise IOError("Checkpoint files were not saved correctly")
+        
+        print(f"💾 Checkpoint saved: {path}")
+        save_successful = True
+        
+    except Exception as e:
+        print(f"❌ Checkpoint save FAILED: {e}")
+        save_successful = False
+    
+    # === DELETE PREVIOUS ONLY IF SAVE SUCCEEDED ===
+    if save_successful and prev_path and prev_path != path and "model_" not in checkpoint_key:
         if os.path.exists(prev_path):
             try:
                 shutil.rmtree(prev_path)
@@ -125,32 +163,9 @@ def save_checkpoint(model, optimizer, path, step, config):
             except Exception as e:
                 print(f"⚠️ Could not delete previous checkpoint: {e}")
     
-    os.makedirs(path, exist_ok=True)
-    
-    # Save weights
-    torch.save(model.state_dict(), os.path.join(path, "weights.pt"))
-    
-    # Save optimizer state
-    torch.save(optimizer.state_dict(), os.path.join(path, "optimizer.pt"))
-    
-    # Save config
-    checkpoint_config = {
-        "step": step,
-        "d_model": model.d_model,
-        "n_layer": len(model.layers),
-        "n_head": model.layers[0].n_head,
-        "vocab_size": model.token_emb.num_embeddings,
-        "max_seq_len": model.max_seq_len,
-        "timestamp": datetime.now().isoformat(),
-        **config
-    }
-    with open(os.path.join(path, "config.json"), "w") as f:
-        json.dump(checkpoint_config, f, indent=2)
-    
     # Track this checkpoint for next deletion
-    _previous_checkpoints[checkpoint_key] = path
-    
-    print(f"💾 Checkpoint saved: {path}")
+    if save_successful:
+        _previous_checkpoints[checkpoint_key] = path
 
 
 def save_resume_state(output_dir, phase, step, extra_data=None):
