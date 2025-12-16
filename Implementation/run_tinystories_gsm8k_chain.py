@@ -130,6 +130,9 @@ def save_checkpoint(model, optimizer, path, step, config):
     # Save weights
     torch.save(model.state_dict(), os.path.join(path, "weights.pt"))
     
+    # Save optimizer state
+    torch.save(optimizer.state_dict(), os.path.join(path, "optimizer.pt"))
+    
     # Save config
     checkpoint_config = {
         "step": step,
@@ -148,6 +151,29 @@ def save_checkpoint(model, optimizer, path, step, config):
     _previous_checkpoints[checkpoint_key] = path
     
     print(f"💾 Checkpoint saved: {path}")
+
+
+def save_resume_state(output_dir, phase, step, extra_data=None):
+    """Save resume state so experiment can continue after crash."""
+    state = {
+        "phase": phase,
+        "step": step,
+        "timestamp": datetime.now().isoformat(),
+    }
+    if extra_data:
+        state.update(extra_data)
+    
+    with open(os.path.join(output_dir, "resume_state.json"), "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def load_resume_state(output_dir):
+    """Load resume state if exists. Returns None if no resume state."""
+    resume_path = os.path.join(output_dir, "resume_state.json")
+    if os.path.exists(resume_path):
+        with open(resume_path, "r") as f:
+            return json.load(f)
+    return None
 
 
 
@@ -177,10 +203,22 @@ def run_experiment():
     logger = DGELogger(CONFIG["output_dir"])
     
     # ========================================================================
-    # PHASE 1: Create Model
+    # RESUME DETECTION
+    # ========================================================================
+    resume_state = load_resume_state(CONFIG["output_dir"])
+    resume_from_phase = 0
+    final_step = 0
+    
+    if resume_state:
+        resume_from_phase = resume_state.get("phase", 0)
+        final_step = resume_state.get("step", 0)
+        print(f"\n🔄 RESUME DETECTED: Continuing from Phase {resume_from_phase}, Step {final_step}")
+    
+    # ========================================================================
+    # PHASE 1: Create Model (or load from checkpoint)
     # ========================================================================
     print("\n" + "=" * 70)
-    print("📦 PHASE 1: Creating Initial Model")
+    print("📦 PHASE 1: Creating/Loading Model")
     print("=" * 70)
     
     model = DGESimpleTransformer(
@@ -190,82 +228,134 @@ def run_experiment():
         n_head=CONFIG["tinystories_n_head"],
         max_seq_len=CONFIG["max_seq_len"]
     )
-    model = model.to(DEVICE)
+    
+    optimizer = None
+    replay_buffer = ReplayBuffer(max_size=10000, task_name="tinystories")
+    
+    # Check for existing checkpoints to resume from
+    if resume_from_phase >= 5:
+        # Load from GSM8K checkpoint (expanded model)
+        gsm8k_ckpt = os.path.join(CONFIG["output_dir"], "gsm8k_checkpoint")
+        if os.path.exists(os.path.join(gsm8k_ckpt, "weights.pt")):
+            print(f"   Loading expanded model from {gsm8k_ckpt}...")
+            # Expand model first
+            model.expand_model(
+                new_input_dim=CONFIG["gsm8k_d_model"],
+                new_output_dim=CONFIG["vocab_size"],
+                router_type='bigram', use_gradient_rescue=True,
+                router_init_bias=0.0, gating_threshold=0.0
+            )
+            model.load_state_dict(torch.load(os.path.join(gsm8k_ckpt, "weights.pt")))
+            model = model.to(DEVICE)
+            optimizer = optim.AdamW(model.parameters(), lr=CONFIG["gsm8k_lr"], weight_decay=0.01)
+            if os.path.exists(os.path.join(gsm8k_ckpt, "optimizer.pt")):
+                optimizer.load_state_dict(torch.load(os.path.join(gsm8k_ckpt, "optimizer.pt")))
+            print(f"   ✅ Resumed from GSM8K checkpoint at step {final_step}")
+    elif resume_from_phase >= 2:
+        # Load from TinyStories checkpoint
+        ts_ckpt = os.path.join(CONFIG["output_dir"], "tinystories_checkpoint")
+        if os.path.exists(os.path.join(ts_ckpt, "weights.pt")):
+            print(f"   Loading model from {ts_ckpt}...")
+            model.load_state_dict(torch.load(os.path.join(ts_ckpt, "weights.pt")))
+            model = model.to(DEVICE)
+            optimizer = optim.AdamW(model.parameters(), lr=CONFIG["tinystories_lr"], weight_decay=0.01)
+            if os.path.exists(os.path.join(ts_ckpt, "optimizer.pt")):
+                optimizer.load_state_dict(torch.load(os.path.join(ts_ckpt, "optimizer.pt")))
+            print(f"   ✅ Resumed from TinyStories checkpoint at step {final_step}")
+    
+    # Load replay buffer if exists
+    buffer_path = os.path.join(CONFIG["output_dir"], "replay_buffer_tinystories")
+    if os.path.exists(buffer_path):
+        try:
+            replay_buffer = ReplayBuffer.load(buffer_path)
+            print(f"   ✅ Loaded replay buffer: {len(replay_buffer)} samples")
+        except Exception as e:
+            print(f"   ⚠️ Could not load replay buffer: {e}")
+    
+    if optimizer is None:
+        model = model.to(DEVICE)
     
     param_count = count_parameters(model)
-    print(f"   d_model: {CONFIG['tinystories_d_model']}")
+    print(f"   d_model: {model.d_model}")
     print(f"   n_layer: {CONFIG['n_layer']}")
-    print(f"   n_head: {CONFIG['tinystories_n_head']}")
+    print(f"   n_head: {model.layers[0].n_head}")
     print(f"   Parameters: {param_count:,}")
     
     experiment_log["phases"]["1_create"] = {
         "params": param_count,
-        "d_model": CONFIG["tinystories_d_model"],
+        "d_model": model.d_model,
     }
     
     logger.log_event("CREATED", {"params": param_count}, step=0)
     
     # ========================================================================
-    # PHASE 2: Train TinyStories
+    # PHASE 2: Train TinyStories (skip if already completed)
     # ========================================================================
-    print("\n" + "=" * 70)
-    print("📖 PHASE 2: Training on TinyStories")
-    print("=" * 70)
-    
-    # Load dataset
-    tinystories_train = load_tinystories(
-        split='train',
-        max_samples=CONFIG["tinystories_max_samples"],
-        seq_len=CONFIG["tinystories_seq_len"],
-        batch_size=CONFIG["tinystories_batch_size"],
-        tokenizer_name='gpt2',
-        vocab_size=CONFIG["vocab_size"]
-    )
-    
-    # Create optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=CONFIG["tinystories_lr"], weight_decay=0.01)
-    
-    # Create replay buffer
-    replay_buffer = ReplayBuffer(max_size=10000, task_name="tinystories")
-    
-    # Train
-    phase2_start = time.time()
-    
-    def checkpoint_fn(step):
-        save_checkpoint(model, optimizer, 
-                       os.path.join(CONFIG["output_dir"], "tinystories_checkpoint"),
-                       step, {"phase": "tinystories"})
-    
-    final_step = train_dataset(
-        model=model,
-        dataloader=tinystories_train,
-        epochs=CONFIG["tinystories_epochs"],
-        optimizer=optimizer,
-        logger=logger,
-        start_step=0,
-        checkpoint_fn=checkpoint_fn,
-        checkpoint_interval=CONFIG["checkpoint_interval"],
-        replay_buffer=replay_buffer,
-        replay_ratio=0.0,  # No replay on first task
-        task_name="tinystories",
-        auto_populate_buffer=True
-    )
-    
-    phase2_time = time.time() - phase2_start
-    
-    # Save checkpoint
-    save_checkpoint(model, optimizer,
-                   os.path.join(CONFIG["output_dir"], "model_tinystories"),
-                   final_step, {"phase": "tinystories_complete"})
-    
-    # Save replay buffer
-    replay_buffer.save(os.path.join(CONFIG["output_dir"], "replay_buffer_tinystories"))
-    
-    experiment_log["phases"]["2_tinystories"] = {
-        "steps": final_step,
-        "time_seconds": phase2_time,
-        "buffer_size": len(replay_buffer),
-    }
+    if resume_from_phase < 3:
+        print("\n" + "=" * 70)
+        print("📖 PHASE 2: Training on TinyStories")
+        print("=" * 70)
+        
+        # Load dataset
+        tinystories_train = load_tinystories(
+            split='train',
+            max_samples=CONFIG["tinystories_max_samples"],
+            seq_len=CONFIG["tinystories_seq_len"],
+            batch_size=CONFIG["tinystories_batch_size"],
+            tokenizer_name='gpt2',
+            vocab_size=CONFIG["vocab_size"]
+        )
+        
+        # Create optimizer if not loaded from checkpoint
+        if optimizer is None:
+            optimizer = optim.AdamW(model.parameters(), lr=CONFIG["tinystories_lr"], weight_decay=0.01)
+        
+        # Train
+        phase2_start = time.time()
+        
+        def checkpoint_fn(step):
+            save_checkpoint(model, optimizer, 
+                           os.path.join(CONFIG["output_dir"], "tinystories_checkpoint"),
+                           step, {"phase": "tinystories"})
+            save_resume_state(CONFIG["output_dir"], 2, step)
+        
+        final_step = train_dataset(
+            model=model,
+            dataloader=tinystories_train,
+            epochs=CONFIG["tinystories_epochs"],
+            optimizer=optimizer,
+            logger=logger,
+            start_step=final_step,
+            checkpoint_fn=checkpoint_fn,
+            checkpoint_interval=CONFIG["checkpoint_interval"],
+            replay_buffer=replay_buffer,
+            replay_ratio=0.0,  # No replay on first task
+            task_name="tinystories",
+            auto_populate_buffer=True
+        )
+        
+        phase2_time = time.time() - phase2_start
+        
+        # Save checkpoint
+        save_checkpoint(model, optimizer,
+                       os.path.join(CONFIG["output_dir"], "model_tinystories"),
+                       final_step, {"phase": "tinystories_complete"})
+        
+        # Save replay buffer
+        replay_buffer.save(os.path.join(CONFIG["output_dir"], "replay_buffer_tinystories"))
+        
+        # Save resume state
+        save_resume_state(CONFIG["output_dir"], 3, final_step)
+        
+        experiment_log["phases"]["2_tinystories"] = {
+            "steps": final_step,
+            "time_seconds": phase2_time,
+            "buffer_size": len(replay_buffer),
+        }
+    else:
+        print("\n⏭️ Skipping Phase 2 (already completed)")
+        phase2_time = 0
+
     
     # ========================================================================
     # PHASE 3: Evaluate TinyStories Baseline
@@ -374,6 +464,9 @@ def run_experiment():
     save_checkpoint(model, optimizer,
                    os.path.join(CONFIG["output_dir"], "model_gsm8k"),
                    final_step, {"phase": "gsm8k_complete"})
+    
+    # Save resume state
+    save_resume_state(CONFIG["output_dir"], 6, final_step)
     
     experiment_log["phases"]["5_gsm8k"] = {
         "steps": final_step,
