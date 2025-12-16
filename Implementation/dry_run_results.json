@@ -1,0 +1,161 @@
+{
+  "passed": 29,
+  "failed": 2,
+  "tests": [
+    {
+      "test": "Import DGESimpleTransformer",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Import train_dataset",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "DEVICE detected: cpu",
+      "status": "PASS",
+      "details": "cpu"
+    },
+    {
+      "test": "Import ReplayBuffer",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Import data loaders",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Import DGELogger",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Version: V 0.7.0",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Model created",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "d_model = 384",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "n_layer = 12",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "pos_emb shape = (1, 1024, 384)",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Parameters: 60,284,160",
+      "status": "PASS",
+      "details": "Expected >50M, got 60,284,160"
+    },
+    {
+      "test": "Forward pass runs",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Logits shape: torch.Size([2, 64, 50257])",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Loss is scalar: 18.3199",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Gradients computed",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Optimizer step",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "d_model expanded: 384 \u2192 1024",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "n_head scaled: 6 \u2192 16",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Parameters increased: 60,284,160 \u2192 914,999,424",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Forward pass after expansion",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Buffer size: 50",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Sample shape: torch.Size([16, 1, 32])",
+      "status": "FAIL",
+      "details": ""
+    },
+    {
+      "test": "Replay buffer",
+      "status": "FAIL",
+      "details": "ReplayBuffer.load() missing 1 required positional argument: 'path'"
+    },
+    {
+      "test": "Checkpoint saved",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Checkpoint keys: 1213",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Dataset length: 20",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Sample x shape: torch.Size([32])",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Sample y shape: torch.Size([32])",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "train_dataset completed: 5 steps",
+      "status": "PASS",
+      "details": ""
+    },
+    {
+      "test": "Buffer populated: 8 samples",
+      "status": "PASS",
+      "details": ""
+    }
+  ]
+}
