@@ -332,9 +332,23 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
             batch_count += 1
             current_step += 1
             
-            # --- Logging ---
+            # --- Logging with ETA ---
             if batch_idx % 50 == 0:
-                print(f"Epoch {epoch+1}/{epochs} | Batch {batch_idx}/{len(dataloader)} | Loss: {loss.item():.4f}")
+                elapsed = time.time() - start_time
+                batches_done = epoch * len(dataloader) + batch_idx + 1
+                total_batches = epochs * len(dataloader)
+                batches_remaining = total_batches - batches_done
+                
+                if batches_done > 0:
+                    time_per_batch = elapsed / batches_done
+                    eta_seconds = batches_remaining * time_per_batch
+                    eta_hours = eta_seconds / 3600
+                    eta_mins = (eta_seconds % 3600) / 60
+                    eta_str = f"ETA: {int(eta_hours)}h {int(eta_mins)}m"
+                else:
+                    eta_str = "ETA: calculating..."
+                
+                print(f"Epoch {epoch+1}/{epochs} | Batch {batch_idx}/{len(dataloader)} | Loss: {loss.item():.4f} | {eta_str}")
             
             # --- Checkpointing ---
             if checkpoint_fn and current_step > 0 and current_step % checkpoint_interval == 0:

@@ -1,5 +1,10 @@
 # RunPod Deployment Guide - DGE TinyStories → GSM8K
 
+
+bash -c "cd /workspace && git clone https://${GIT_TOKEN}@github.com/bofh31415/DGE.git && cd DGE/Implementation && pip install -r requirements.txt && python run_tinystories_gsm8k_chain.py"
+
+
+
 ## Tokens Needed
 
 ### 1. GitHub Token (for cloning private repo)
