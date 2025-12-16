@@ -444,8 +444,104 @@ def run_experiment():
     print(f"   Total Time: {(phase2_time + phase5_time) / 3600:.2f} hours")
     print("=" * 70)
     
+    # ========================================================================
+    # PHASE 9: Upload to HuggingFace Hub
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("☁️ PHASE 9: Uploading to HuggingFace Hub")
+    print("=" * 70)
+    
+    hf_token = os.environ.get("HF_TOKEN")
+    hf_repo = "darealSven/dge-tinystories-gsm8k"
+    
+    if hf_token:
+        try:
+            from huggingface_hub import HfApi, create_repo
+            
+            api = HfApi(token=hf_token)
+            
+            # Create repo if it doesn't exist (private by default)
+            try:
+                create_repo(repo_id=hf_repo, token=hf_token, private=True, exist_ok=True)
+                print(f"   📦 Repository: {hf_repo}")
+            except Exception as e:
+                print(f"   ⚠️ Repo creation note: {e}")
+            
+            # Upload entire output directory
+            print(f"   📤 Uploading {CONFIG['output_dir']}...")
+            api.upload_folder(
+                folder_path=CONFIG["output_dir"],
+                repo_id=hf_repo,
+                repo_type="model",
+                commit_message=f"DGE Experiment Results - {datetime.now().isoformat()}"
+            )
+            
+            print(f"   ✅ Uploaded to: https://huggingface.co/{hf_repo}")
+            experiment_log["hf_upload"] = {"status": "success", "repo": hf_repo}
+            
+        except ImportError:
+            print("   ⚠️ huggingface_hub not installed. Skipping upload.")
+            print("      Install with: pip install huggingface_hub")
+            experiment_log["hf_upload"] = {"status": "skipped", "reason": "huggingface_hub not installed"}
+        except Exception as e:
+            print(f"   ❌ Upload failed: {e}")
+            experiment_log["hf_upload"] = {"status": "failed", "error": str(e)}
+    else:
+        print("   ⚠️ HF_TOKEN not set. Skipping HuggingFace upload.")
+        print("      Set with: export HF_TOKEN=hf_your_token")
+        experiment_log["hf_upload"] = {"status": "skipped", "reason": "HF_TOKEN not set"}
+    
+    # ========================================================================
+    # PHASE 10: Git Push Logs (Backup)
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("📝 PHASE 10: Git Push Logs (Backup)")
+    print("=" * 70)
+    
+    try:
+        import subprocess
+        
+        # Only push small files (JSON, configs)
+        subprocess.run(["git", "add", 
+                       f"{CONFIG['output_dir']}/experiment_results.json",
+                       f"{CONFIG['output_dir']}/*/config.json"],
+                      capture_output=True, cwd=os.path.dirname(__file__))
+        
+        result = subprocess.run(
+            ["git", "commit", "-m", f"Experiment results: {datetime.now().isoformat()}"],
+            capture_output=True, text=True, cwd=os.path.dirname(__file__)
+        )
+        
+        if result.returncode == 0:
+            push_result = subprocess.run(
+                ["git", "push", "origin", "master"],
+                capture_output=True, text=True, cwd=os.path.dirname(__file__)
+            )
+            if push_result.returncode == 0:
+                print("   ✅ Logs pushed to GitHub")
+                experiment_log["git_push"] = {"status": "success"}
+            else:
+                print(f"   ⚠️ Git push failed: {push_result.stderr}")
+                experiment_log["git_push"] = {"status": "failed", "error": push_result.stderr}
+        else:
+            print(f"   ℹ️ Nothing to commit or commit failed")
+            experiment_log["git_push"] = {"status": "no_changes"}
+            
+    except Exception as e:
+        print(f"   ⚠️ Git operations failed: {e}")
+        experiment_log["git_push"] = {"status": "error", "error": str(e)}
+    
+    # Save final log with upload status
+    with open(results_path, "w") as f:
+        json.dump(experiment_log, f, indent=2)
+    
+    print("\n" + "=" * 70)
+    print("🎉 ALL PHASES COMPLETE!")
+    print("=" * 70)
+    
     return experiment_log
 
 
 if __name__ == "__main__":
     run_experiment()
+
