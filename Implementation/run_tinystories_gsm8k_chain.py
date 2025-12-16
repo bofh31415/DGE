@@ -71,8 +71,11 @@ CONFIG = {
     
     # Paths
     "output_dir": "models/tinystories_gsm8k_chain",
-    "checkpoint_interval": 500,
+    "checkpoint_interval": 5000,
 }
+
+# HuggingFace Hub configuration
+HF_REPO = "darealSven/dge-tinystories-gsm8k"
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -105,8 +108,98 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+# ============================================================================
+# BACKGROUND HF UPLOAD
+# ============================================================================
+
+import threading
+import queue
+
+_upload_queue = queue.Queue()
+_upload_thread = None
+_upload_thread_running = False
+
+def _upload_worker():
+    """Background worker that uploads checkpoints to HuggingFace Hub."""
+    global _upload_thread_running
+    
+    hf_token = os.environ.get("HF_TOKEN")
+    if not hf_token:
+        print("⚠️ HF_TOKEN not set - background uploads disabled")
+        return
+    
+    try:
+        from huggingface_hub import HfApi, create_repo
+        api = HfApi(token=hf_token)
+        
+        # Create repo if it doesn't exist (first upload will create it)
+        try:
+            create_repo(repo_id=HF_REPO, token=hf_token, private=True, exist_ok=True)
+        except Exception as e:
+            print(f"⚠️ Repo creation note: {e}")
+        
+    except ImportError:
+        print("⚠️ huggingface_hub not installed - background uploads disabled")
+        return
+    
+    _upload_thread_running = True
+    
+    while _upload_thread_running:
+        try:
+            # Wait for upload task (timeout allows checking running flag)
+            task = _upload_queue.get(timeout=5)
+            if task is None:  # Shutdown signal
+                break
+            
+            folder_path, step = task
+            print(f"☁️ [Background] Uploading {folder_path} to HF Hub...")
+            
+            try:
+                api.upload_folder(
+                    folder_path=folder_path,
+                    repo_id=HF_REPO,
+                    repo_type="model",
+                    commit_message=f"Checkpoint at step {step}"
+                )
+                print(f"☁️ [Background] ✅ Uploaded: {folder_path}")
+            except Exception as e:
+                print(f"☁️ [Background] ❌ Upload failed: {e}")
+            
+            _upload_queue.task_done()
+            
+        except queue.Empty:
+            continue  # Just check running flag
+        except Exception as e:
+            print(f"☁️ [Background] Worker error: {e}")
+
+
+def start_upload_worker():
+    """Start the background upload worker thread."""
+    global _upload_thread
+    if _upload_thread is None or not _upload_thread.is_alive():
+        _upload_thread = threading.Thread(target=_upload_worker, daemon=True)
+        _upload_thread.start()
+        print("☁️ Background HF upload worker started")
+
+
+def upload_to_hf_async(folder_path, step):
+    """Queue a folder for background upload to HuggingFace Hub."""
+    _upload_queue.put((folder_path, step))
+
+
+def shutdown_upload_worker():
+    """Gracefully shutdown the upload worker and wait for pending uploads."""
+    global _upload_thread_running
+    _upload_thread_running = False
+    _upload_queue.put(None)  # Shutdown signal
+    if _upload_thread and _upload_thread.is_alive():
+        print("☁️ Waiting for pending uploads to complete...")
+        _upload_thread.join(timeout=300)  # Wait up to 5 minutes
+
+
 # Track previous checkpoint paths for deletion
 _previous_checkpoints = {}
+
 
 def save_checkpoint(model, optimizer, path, step, config):
     """Save model checkpoint with config. Deletes previous checkpoint AFTER successful save."""
@@ -166,6 +259,9 @@ def save_checkpoint(model, optimizer, path, step, config):
     # Track this checkpoint for next deletion
     if save_successful:
         _previous_checkpoints[checkpoint_key] = path
+        
+        # Queue for background upload to HuggingFace Hub
+        upload_to_hf_async(path, step)
 
 
 def save_resume_state(output_dir, phase, step, extra_data=None):
@@ -216,6 +312,9 @@ def run_experiment():
     
     os.makedirs(CONFIG["output_dir"], exist_ok=True)
     logger = DGELogger(CONFIG["output_dir"])
+    
+    # Start background HF upload worker
+    start_upload_worker()
     
     # ========================================================================
     # RESUME DETECTION
@@ -679,6 +778,8 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
     finally:
+        # Wait for pending HF uploads to complete
+        shutdown_upload_worker()
         # ALWAYS terminate pod to avoid ongoing charges
         terminate_runpod()
 
