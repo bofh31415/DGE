@@ -30,3 +30,8 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Data Storage
+data_store/
+*.jsonl
+
