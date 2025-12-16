@@ -10,6 +10,13 @@ try:
 except ImportError:
     psutil = None
 
+# Device detection - automatically use GPU if available
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def get_device():
+    """Return the current training device (cuda or cpu)."""
+    return DEVICE
+
 class TaskType(Enum):
     COUNT_UP = 1
     COUNT_DOWN = 2
@@ -56,6 +63,11 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
                sparsity_lambda=0.05, **kwargs):
     print(f"\n--- Starting Training: {task_type.name} ({steps} steps) ---")
     
+    # Device handling - move model to GPU if available
+    device = DEVICE
+    model = model.to(device)
+    print(f"🖥️ Training on: {device}" + (f" ({torch.cuda.get_device_name(0)})" if device.type == 'cuda' else ""))
+    
     if optimizer is None:
         optimizer = optim.AdamW(model.parameters(), lr=1e-3)
         print("⚠️ Warning: Using default AdamW instead of passed optimizer.")
@@ -72,6 +84,7 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
     replay_tasks = kwargs.get('replay_tasks', [])
     replay_ratio = kwargs.get('replay_ratio', 1.0) # Default to 1:1 if not specified
     replay_debt = 0.0
+
     
     for i in range(steps):
         current_step = start_step + i
@@ -103,6 +116,7 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
             r_task = replay_tasks[replay_idx]
             
             x, y = generate_batch(r_task, vocab_size, batch_size, seq_len)
+            x, y = x.to(device), y.to(device)
             
             optimizer.zero_grad()
             logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
@@ -124,6 +138,7 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
         else:
             # Main Task Logic: Train Everything
             x, y = generate_batch(task_type, vocab_size, batch_size, seq_len)
+            x, y = x.to(device), y.to(device)
             
             optimizer.zero_grad()
             logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
@@ -144,6 +159,7 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
                 model.eval()
                 with torch.no_grad():
                     xp, yp = generate_batch(probe_task_type, vocab_size, batch_size, seq_len)
+                    xp, yp = xp.to(device), yp.to(device)
                     # Forward pass updates gate statistics (last_mean_open)
                     _, ploss = model(xp, yp)
                     probe_loss = ploss.item()
@@ -243,6 +259,11 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
     
     print(f"\n--- Starting Dataset Training: {task_name} ({epochs} epochs) ---")
     
+    # Device handling - move model to GPU if available
+    device = DEVICE
+    model = model.to(device)
+    print(f"🖥️ Training on: {device}" + (f" ({torch.cuda.get_device_name(0)})" if device.type == 'cuda' else ""))
+    
     if optimizer is None:
         optimizer = optim.AdamW(model.parameters(), lr=1e-3)
         print("⚠️ Warning: Using default AdamW instead of passed optimizer.")
@@ -267,6 +288,9 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
         batch_count = 0
         
         for batch_idx, (x, y) in enumerate(dataloader):
+            # Move data to device
+            x, y = x.to(device), y.to(device)
+            
             # --- Determine if this is a Replay Step ---
             is_replay_step = False
             if replay_buffer and not replay_buffer.is_empty() and replay_ratio:
@@ -281,6 +305,7 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
             if is_replay_step:
                 # --- Asymmetric Replay: Train Router Only ---
                 x_r, y_r = replay_buffer.sample(x.size(0))
+                x_r, y_r = x_r.to(device), y_r.to(device)
                 
                 optimizer.zero_grad()
                 logits, loss = model(x_r, y_r, sparsity_lambda=sparsity_lambda)
@@ -348,6 +373,9 @@ def evaluate_task(model, task_type, vocab_size=1000, samples=100, seq_len=32):
     """
     Evaluates accuracy on the specified task.
     """
+    # Get device from model
+    device = next(model.parameters()).device
+    
     model.eval()
     correct = 0
     total_tokens = 0
@@ -356,6 +384,7 @@ def evaluate_task(model, task_type, vocab_size=1000, samples=100, seq_len=32):
         # Generate one large batch or multiple small ones
         # Use single batch for simplicity of 'samples'
         x, y = generate_batch(task_type, vocab_size, samples, seq_len)
+        x, y = x.to(device), y.to(device)
         
         logits, _ = model(x)
         preds = logits.argmax(dim=-1)
@@ -369,3 +398,4 @@ def evaluate_task(model, task_type, vocab_size=1000, samples=100, seq_len=32):
     acc = correct / total_tokens * 100.0
     model.train()
     return acc
+
