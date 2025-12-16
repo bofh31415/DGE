@@ -635,7 +635,52 @@ def run_experiment():
     return experiment_log
 
 
+# ============================================================================
+# RUNPOD AUTO-TERMINATE
+# ============================================================================
+
+def terminate_runpod():
+    """Terminate the RunPod pod to avoid ongoing charges. Uses 'remove' for zero cost."""
+    import subprocess
+    
+    pod_id = os.environ.get('RUNPOD_POD_ID')
+    
+    if pod_id:
+        print("\n" + "=" * 70)
+        print("🛑 TERMINATING RUNPOD POD")
+        print("=" * 70)
+        print(f"   Pod ID: {pod_id}")
+        print("   Action: REMOVE (complete deletion, zero cost)")
+        
+        try:
+            result = subprocess.run(
+                ["runpodctl", "remove", "pod", pod_id],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                print("   ✅ Pod termination initiated!")
+            else:
+                print(f"   ⚠️ Command returned: {result.stderr}")
+        except FileNotFoundError:
+            print("   ⚠️ runpodctl not found. Pod will continue running.")
+        except Exception as e:
+            print(f"   ❌ Failed to terminate: {e}")
+    else:
+        print("\n💻 Running locally (no RUNPOD_POD_ID). Skipping pod termination.")
+
+
 if __name__ == "__main__":
-    run_experiment()
+    try:
+        run_experiment()
+    except KeyboardInterrupt:
+        print("\n\n⚠️ Interrupted by user!")
+    except Exception as e:
+        print(f"\n\n❌ EXPERIMENT FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # ALWAYS terminate pod to avoid ongoing charges
+        terminate_runpod()
+
 
 
