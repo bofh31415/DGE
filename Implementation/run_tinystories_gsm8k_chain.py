@@ -105,8 +105,26 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+# Track previous checkpoint paths for deletion
+_previous_checkpoints = {}
+
 def save_checkpoint(model, optimizer, path, step, config):
-    """Save model checkpoint with config."""
+    """Save model checkpoint with config. Deletes previous checkpoint to save disk space."""
+    import shutil
+    
+    # Get checkpoint category (e.g., "tinystories_checkpoint", "gsm8k_checkpoint")
+    checkpoint_key = os.path.basename(path)
+    
+    # Delete previous checkpoint if exists (but not final models)
+    if checkpoint_key in _previous_checkpoints and "model_" not in checkpoint_key:
+        prev_path = _previous_checkpoints[checkpoint_key]
+        if os.path.exists(prev_path):
+            try:
+                shutil.rmtree(prev_path)
+                print(f"🗑️ Deleted previous checkpoint: {prev_path}")
+            except Exception as e:
+                print(f"⚠️ Could not delete previous checkpoint: {e}")
+    
     os.makedirs(path, exist_ok=True)
     
     # Save weights
@@ -126,7 +144,12 @@ def save_checkpoint(model, optimizer, path, step, config):
     with open(os.path.join(path, "config.json"), "w") as f:
         json.dump(checkpoint_config, f, indent=2)
     
+    # Track this checkpoint for next deletion
+    _previous_checkpoints[checkpoint_key] = path
+    
     print(f"💾 Checkpoint saved: {path}")
+
+
 
 
 # ============================================================================
