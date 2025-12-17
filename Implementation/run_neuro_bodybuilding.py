@@ -5,6 +5,10 @@ import torch.optim as optim
 import neuro_bodybuilding
 import time
 import os
+from dotenv import load_dotenv
+
+# Load environment variables (HF_TOKEN, etc.)
+load_dotenv()
 
 def run_experiment():
     print("\n" + "="*60)
@@ -31,9 +35,27 @@ def run_experiment():
     # model.load_state_dict(torch.load("..."))
     
     # 3. Data
-    print("Loading TinyStories...")
-    # Using a small subset/split for the experiment
-    dataloader = data.load_tinystories(split="train", batch_size=config.batch_size, seq_len=config.seq_len, max_samples=1000)
+    psycho_path = os.path.join("data_store", "german_psycho.jsonl")
+    if os.path.exists(psycho_path):
+        print(f"🧠 Loading German Psycho Dataset from {psycho_path}...")
+        try:
+            from transformers import AutoTokenizer
+            from torch.utils.data import DataLoader
+            import german_psycho_data
+            
+            tokenizer = AutoTokenizer.from_pretrained("gpt2")
+            tokenizer.pad_token = tokenizer.eos_token
+            
+            dataset = german_psycho_data.GermanPsychoDataset(psycho_path, tokenizer, max_length=config.seq_len)
+            dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
+            print(f"   Loaded {len(dataset)} psycho-samples.")
+        except Exception as e:
+            print(f"   Error loading psycho data: {e}. Fallback to TinyStories.")
+            dataloader = data.load_tinystories(split="train", batch_size=config.batch_size, seq_len=config.seq_len, max_samples=1000)
+    else:
+        print("Loading TinyStories...")
+        # Using a small subset/split for the experiment
+        dataloader = data.load_tinystories(split="train", batch_size=config.batch_size, seq_len=config.seq_len, max_samples=1000)
     
     # 4. Trainer
     optimizer = optim.AdamW(model.parameters(), lr=1e-4)
@@ -45,7 +67,7 @@ def run_experiment():
     
     # 5. Loop
     print("\nStarting Workout...")
-    epochs = 1
+    epochs = 5
     total_steps = 0
     start_time = time.time()
     
@@ -60,7 +82,7 @@ def run_experiment():
                 print(f"Epoch {epoch} | Step {batch_idx} | Loss: {loss:.4f} | Fitness: {fitness:.4f}")
                 
             total_steps += 1
-            if total_steps >= 50: # Short proof of concept
+            if total_steps >= 200: # Short proof of concept
                 break
                 
     end_time = time.time()
