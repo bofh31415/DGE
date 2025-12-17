@@ -122,6 +122,8 @@ def create_chunked_archive(source_dir, output_prefix, chunk_size_mb=400):
     """
     Zip a directory and split it into chunks of given size.
     Returns list of generated chunk files.
+    
+    Uses ZIP64 extensions for files >4GB and DEFLATED compression.
     """
     import shutil
     import zipfile
@@ -129,12 +131,28 @@ def create_chunked_archive(source_dir, output_prefix, chunk_size_mb=400):
     # 1. Zip to temporary single file using ZIP64 to support >4GB
     temp_zip = output_prefix + ".temp.zip"
     
-    with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_STORED, allowZip64=True) as zf:
-        for root, dirs, files in os.walk(source_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, source_dir)
-                zf.write(file_path, arcname)
+    # Use DEFLATED for compression, ZIP64 for large files
+    try:
+        with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+            for root, dirs, files in os.walk(source_dir):
+                for file in files:
+                    # Skip the temp zip itself and any existing chunks
+                    if file.endswith('.temp.zip') or '.zip.' in file:
+                        continue
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, source_dir)
+                    zf.write(file_path, arcname)
+    except Exception as e:
+        safe_print(f"[ZIP] Compression failed: {e}, trying without compression...")
+        # Fallback to STORED (no compression)
+        with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_STORED, allowZip64=True) as zf:
+            for root, dirs, files in os.walk(source_dir):
+                for file in files:
+                    if file.endswith('.temp.zip') or '.zip.' in file:
+                        continue
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, source_dir)
+                    zf.write(file_path, arcname)
     
     # 2. Split into chunks
     chunk_size = chunk_size_mb * 1024 * 1024
