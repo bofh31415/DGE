@@ -63,11 +63,28 @@ echo "HF_HOME=/workspace/hf_cache" >> .env
 pip install huggingface_hub[cli]
 huggingface-cli login --token $(grep HF_TOKEN .env | cut -d= -f2)
 
-# 4. Run Experiment (Recommended with tmux)
+# 4. Create HuggingFace Repos (ONE-TIME SETUP)
+# This creates private repos for checkpoint storage
+python -c "
+from huggingface_hub import HfApi, create_repo
+import os
+from dotenv import load_dotenv
+load_dotenv()
+api = HfApi(token=os.environ.get('HF_TOKEN'))
+repos = ['dge-tinystories-gsm8k', 'dge-tinystories-german-psycho']
+for repo in repos:
+    try:
+        create_repo(f'darealSven/{repo}', private=True, exist_ok=True)
+        print(f'✅ Repo created: {repo}')
+    except Exception as e:
+        print(f'⚠️ {repo}: {e}')
+"
+
+# 5. Run Experiment (Recommended with tmux)
 # tmux prevents the script from dying if your browser disconnects.
 tmux new -s dge
 
-python run_tinystories_gsm8k_chain.py
+source .env && python run_tinystories_gsm8k_chain.py
 
 # Detach: Press Ctrl+b, then release and press d
 # Re-attach later: tmux attach -t dge
