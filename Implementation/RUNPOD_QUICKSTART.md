@@ -42,6 +42,7 @@ python run_tinystories_gsm8k_chain.py
 
 ```bash
 # 1. Setup Repo (Clone ONLY Implementation dir)
+cd /workspace
 mkdir DGE && cd DGE
 git init
 git remote add origin https://YOUR_GITHUB_TOKEN@github.com/bofh31415/DGE.git

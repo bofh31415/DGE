@@ -691,57 +691,22 @@ class DGELab:
                 import run_seed_fund_experiment
                 print("\n🟢 Running Directed Synergy (V26 - Working Config)...")
                 run_seed_fund_experiment.run_seed_fund_experiment()
+            elif choice == '19':
+                import run_replay_ratio_experiment
+                print("\n📉 Running Variable Replay Ratio Sensitivity Experiment...")
+                run_replay_ratio_experiment.run_experiment()
+            elif choice == '20':
+                self._run_tinystories_training()
+            elif choice == '21':
+                import run_tinystories_gsm8k_chain
+                print("\n🔬 Running TinyStories → GSM8K Chain (Paper Experiment)...")
+                run_tinystories_gsm8k_chain.run_experiment()
+            elif choice == 'b':
+                break
+            elif choice == 'q':
+                print("👋 Goodbye!")
+                sys.exit(0)
             elif choice == '2':
-                # Single Experiment (Legacy Option 8)
-                print("\\n🧪 RUNNING SINGLE EXPERIMENT (V 0.2.0 Spec)...")
-                self.reset_model()
-                vocab_size = 500
-                
-                # Train Skill A
-                print("Training Skill A (COUNT_UP)...")
-                new_step = train_task(
-                    self.model, TaskType.COUNT_UP, vocab_size=vocab_size, steps=500,
-                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer
-                )
-                self.global_step = new_step
-                self.trained_skills.add(TaskType.COUNT_UP.name)
-                
-                # Expand
-                print("Expanding model...")
-                current_d_model = self.model.d_model
-                self.model.expand_model(new_input_dim=current_d_model + 64, 
-                                  new_output_dim=self.model.token_emb.num_embeddings, 
-                                  router_type='mlp',
-                                  isolate_cross_terms=True,
-                                  use_gradient_rescue=True,
-                                  use_orthogonal_init=True)
-                
-                # Split parameters for Differential LR
-                router_params = []
-                default_params = []
-                for name, param in self.model.named_parameters():
-                    if 'router' in name or 'gate' in name:
-                        router_params.append(param)
-                    else:
-                        default_params.append(param)
-                        
-                self.optimizer = DGEAdamW([
-                    {'params': default_params, 'lr': 1e-3},
-                    {'params': router_params, 'lr': 1e-4}
-                ], weight_decay=0.0)
-                
-                # Train Skill B with probing
-                print("Training Skill B (COUNT_DOWN) with Skill A probing...")
-                new_step = train_task(
-                    self.model, TaskType.COUNT_DOWN, vocab_size=vocab_size, steps=500,
-                    logger=self.logger, start_step=self.global_step, optimizer=self.optimizer,
-                    probe_task=TaskType.COUNT_UP, sparsity_lambda=0.05
-                )
-                self.global_step = new_step
-                self.trained_skills.add(TaskType.COUNT_DOWN.name)
-                self.save_model("dge_single_exp_custom")
-            elif choice == '4':
-                # Experiment Chain V3
                 print("\\n⚙️ STARTING EXPERIMENT CHAIN V3 (Gradient Rescue & Orthogonality)...")
                 vocab_size = 500
                 
