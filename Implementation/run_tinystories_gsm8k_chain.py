@@ -116,30 +116,19 @@ def create_chunked_archive(source_dir, output_prefix, chunk_size_mb=400):
     import shutil
     import zipfile
     
-    # 1. Zip to temporary single file
+    # 1. Zip to temporary single file using ZIP64 to support >4GB
     temp_zip = output_prefix + ".temp.zip"
-    shutil.make_archive(temp_zip.replace(".zip", ""), 'zip', source_dir)
     
-    # Verify zip was created (make_archive appends .zip automatically if not present in base_name)
-    # If output_prefix=".../archive", make_archive(".../archive") -> ".../archive.zip"
-    # So temp_zip should match that.
+    with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+        for root, dirs, files in os.walk(source_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, source_dir)
+                zf.write(file_path, arcname)
     
     # 2. Split into chunks
     chunk_size = chunk_size_mb * 1024 * 1024
     chunk_files = []
-    
-    if os.path.exists(temp_zip):
-        # make_archive might have named it temp_zip already
-        pass
-    elif os.path.exists(output_prefix + ".temp.zip"):
-        temp_zip = output_prefix + ".temp.zip"
-    else:
-        # Fallback if make_archive naming is tricky
-        # Usually make_archive(base_name, 'zip') -> base_name.zip
-        pass
-
-    # Actually, shutil.make_archive usage:
-    # make_archive(base_name="/tmp/foo", format="zip", root_dir="/data") -> "/tmp/foo.zip"
     
     real_temp_zip = temp_zip
     
