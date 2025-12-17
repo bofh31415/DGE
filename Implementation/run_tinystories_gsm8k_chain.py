@@ -108,9 +108,112 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-# ============================================================================
-# BACKGROUND HF UPLOAD
-# ============================================================================
+def create_chunked_archive(source_dir, output_prefix, chunk_size_mb=400):
+    """
+    Zip a directory and split it into chunks of given size.
+    Returns list of generated chunk files.
+    """
+    import shutil
+    import zipfile
+    
+    # 1. Zip to temporary single file
+    temp_zip = output_prefix + ".temp.zip"
+    shutil.make_archive(temp_zip.replace(".zip", ""), 'zip', source_dir)
+    
+    # Verify zip was created (make_archive appends .zip automatically if not present in base_name)
+    # If output_prefix=".../archive", make_archive(".../archive") -> ".../archive.zip"
+    # So temp_zip should match that.
+    
+    # 2. Split into chunks
+    chunk_size = chunk_size_mb * 1024 * 1024
+    chunk_files = []
+    
+    if os.path.exists(temp_zip):
+        # make_archive might have named it temp_zip already
+        pass
+    elif os.path.exists(output_prefix + ".temp.zip"):
+        temp_zip = output_prefix + ".temp.zip"
+    else:
+        # Fallback if make_archive naming is tricky
+        # Usually make_archive(base_name, 'zip') -> base_name.zip
+        pass
+
+    # Actually, shutil.make_archive usage:
+    # make_archive(base_name="/tmp/foo", format="zip", root_dir="/data") -> "/tmp/foo.zip"
+    
+    real_temp_zip = temp_zip
+    
+    part_num = 0
+    with open(real_temp_zip, 'rb') as src:
+        while True:
+            chunk = src.read(chunk_size)
+            if not chunk:
+                break
+            part_filename = f"{output_prefix}.zip.{part_num:03d}"
+            with open(part_filename, 'wb') as dst:
+                dst.write(chunk)
+            chunk_files.append(part_filename)
+            part_num += 1
+            
+    # 3. Cleanup temp file
+    if os.path.exists(real_temp_zip):
+        os.remove(real_temp_zip)
+        
+    return chunk_files
+
+def restore_chunked_archive(archive_prefix, output_dir):
+    """
+    Reassemble split zip parts and unzip to output_dir.
+    """
+    import glob
+    import zipfile
+    import shutil
+    
+    # 1. Find parts
+    parts = sorted(glob.glob(f"{archive_prefix}.zip.*"))
+    if not parts:
+        raise FileNotFoundError(f"No archive parts found for {archive_prefix}")
+        
+    # 2. Reassemble
+    temp_zip = archive_prefix + ".reconstructed.zip"
+    with open(temp_zip, 'wb') as dst:
+        for part in parts:
+            with open(part, 'rb') as src:
+                shutil.copyfileobj(src, dst)
+                
+    # 3. Unzip
+    with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
+        zip_ref.extractall(output_dir)
+        
+    # 4. Cleanup
+    if os.path.exists(temp_zip):
+        os.remove(temp_zip)
+
+def ensure_checkpoint_restored(ckpt_path):
+    """
+    Check if checkpoint is chunked. If so, restore it.
+    Returns True if weights.pt exists (or was restored), False otherwise.
+    """
+    import glob
+    weights_path = os.path.join(ckpt_path, "weights.pt")
+    if os.path.exists(weights_path):
+        return True
+    
+    # Check for archive
+    archive_prefix = os.path.join(ckpt_path, "checkpoint_archive")
+    # Check for .zip.000 or similar
+    if glob.glob(archive_prefix + ".zip.*"):
+        print(f"📦 Restoring chunked checkpoint: {ckpt_path}...")
+        try:
+            restore_chunked_archive(archive_prefix, ckpt_path)
+            if os.path.exists(weights_path):
+                print(f"   ✅ Restored successfully.")
+                return True
+        except Exception as e:
+            print(f"❌ Restoration failed: {e}")
+            return False
+            
+    return False
 
 import threading
 import queue
@@ -264,6 +367,28 @@ def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, i
             raise IOError("Checkpoint files were not saved correctly")
         
         print(f"💾 Checkpoint saved: {path} (Optim: {save_optimizer}, Rolling: {is_rolling})")
+        
+        # === CHUNK & COMPRESS (Moon Landing V2) ===
+        # Zip and split large files to avoid HF/Git limits
+        print(f"📦 Compressing and chunking checkpoint...")
+        
+        # 1. Create Archive (excluding json files initially? No, make_archive zips everything)
+        # We want to zip `weights.pt` and `optimizer.pt`
+        # But `config.json` and `resume_state.json` should ideally remain visible?
+        # create_chunked_archive zips the whole folder.
+        
+        chunks = create_chunked_archive(path, os.path.join(path, "checkpoint_archive"), chunk_size_mb=400)
+        print(f"   -> Created {len(chunks)} chunks.")
+        
+        # 2. Delete original large files to save space
+        if os.path.exists(weights_path):
+            os.remove(weights_path)
+        if save_optimizer and os.path.exists(optimizer_path):
+            os.remove(optimizer_path)
+        
+        # Note: config.json and resume_state.json remain in the folder (and inside zip too).
+        # This is fine. (Data redundancy is negligible for small files).
+            
         save_successful = True
         
     except Exception as e:
@@ -373,9 +498,9 @@ def run_experiment():
     
     # Check for existing checkpoints to resume from
     if resume_from_phase >= 5:
-        # Load from GSM8K checkpoint (expanded model)
-        gsm8k_ckpt = os.path.join(CONFIG["output_dir"], "gsm8k_checkpoint")
-        if os.path.exists(os.path.join(gsm8k_ckpt, "weights.pt")):
+        # Load from GSM8K checkpoint (expanded model) - Unified Resume Checkpoint
+        gsm8k_ckpt = os.path.join(CONFIG["output_dir"], "resume_checkpoint")
+        if ensure_checkpoint_restored(gsm8k_ckpt):
             print(f"   Loading expanded model from {gsm8k_ckpt}...")
             # Expand model first
             model.expand_model(
@@ -391,9 +516,9 @@ def run_experiment():
                 optimizer.load_state_dict(torch.load(os.path.join(gsm8k_ckpt, "optimizer.pt")))
             print(f"   ✅ Resumed from GSM8K checkpoint at step {final_step}")
     elif resume_from_phase >= 2:
-        # Load from TinyStories checkpoint
-        ts_ckpt = os.path.join(CONFIG["output_dir"], "tinystories_checkpoint")
-        if os.path.exists(os.path.join(ts_ckpt, "weights.pt")):
+        # Load from TinyStories checkpoint - Unified Resume Checkpoint
+        ts_ckpt = os.path.join(CONFIG["output_dir"], "resume_checkpoint")
+        if ensure_checkpoint_restored(ts_ckpt):
             print(f"   Loading model from {ts_ckpt}...")
             model.load_state_dict(torch.load(os.path.join(ts_ckpt, "weights.pt")))
             model = model.to(DEVICE)
@@ -665,8 +790,8 @@ def run_experiment():
     
     for ckpt_name, d_model_ckpt in checkpoints_to_verify:
         ckpt_path = os.path.join(CONFIG["output_dir"], ckpt_name)
-        if not os.path.exists(os.path.join(ckpt_path, "weights.pt")):
-            print(f"⚠️ Checkpoint {ckpt_name} not found, skipping verification.")
+        if not ensure_checkpoint_restored(ckpt_path):
+            print(f"⚠️ Checkpoint {ckpt_name} not found (or failed restore), skipping verification.")
             continue
             
         print(f"\n🔍 Verifying Model: {ckpt_name}")
