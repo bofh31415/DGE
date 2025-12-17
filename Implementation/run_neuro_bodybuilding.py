@@ -19,7 +19,8 @@ def run_experiment():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
     
-    config = dge_model.DGEConfig(
+    from types import SimpleNamespace
+    config = SimpleNamespace(
         vocab_size=50257,
         d_model=384,
         n_layer=6, # Small for testing
@@ -30,7 +31,13 @@ def run_experiment():
     
     # 2. Model
     print("Creating Model...")
-    model = dge_model.DGETransformer(config).to(device)
+    model = dge_model.DGESimpleTransformer(
+        vocab_size=config.vocab_size,
+        d_model=config.d_model,
+        n_layer=config.n_layer,
+        n_head=config.n_head,
+        max_seq_len=config.seq_len
+    ).to(device)
     # Ideally load pre-trained weights here
     # model.load_state_dict(torch.load("..."))
     
