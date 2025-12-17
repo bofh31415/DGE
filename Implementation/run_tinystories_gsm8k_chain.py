@@ -412,6 +412,19 @@ def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, i
     resume_file_src = os.path.join(parent_dir, "resume_state.json")
     resume_file_dst = os.path.join(path, "resume_state.json")
     
+    # === DISK SPACE CHECK ===
+    try:
+        total, used, free = shutil.disk_usage(parent_dir if parent_dir else ".")
+        free_gb = free / (2**30)
+        safe_print(f"[DISK] Free: {free_gb:.2f} GB")
+        
+        if free_gb < 2.0:
+            safe_print(f"[WARN] Critical disk space! Only {free_gb:.2f} GB left. Checkpoint may fail.")
+        elif free_gb < 5.0:
+            safe_print(f"[WARN] Low disk space: {free_gb:.2f} GB")
+    except Exception as e:
+        safe_print(f"[DISK] Could not check space: {e}")
+    
     # === SAVE FIRST (before any deletion) ===
     os.makedirs(path, exist_ok=True)
     
