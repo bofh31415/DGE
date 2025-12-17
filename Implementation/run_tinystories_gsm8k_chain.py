@@ -201,13 +201,31 @@ def shutdown_upload_worker():
 _previous_checkpoints = {}
 
 
-def save_checkpoint(model, optimizer, path, step, config):
-    """Save model checkpoint with config. Deletes previous checkpoint AFTER successful save."""
+def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, is_rolling=True):
+    """
+    Save model checkpoint with config.
+    
+    Args:
+        model: The model to save
+        optimizer: The optimizer to save
+        path: Directory path to save to
+        step: Current training step
+        config: Configuration dictionary
+        save_optimizer (bool): Whether to save optimizer state. False for Milestones (weights only).
+        is_rolling (bool): Whether to delete previous checkpoint of same key. True for Resume, False for Milestones.
+    """
     import shutil
     
-    # Get checkpoint category (e.g., "tinystories_checkpoint", "gsm8k_checkpoint")
+    # Get checkpoint category (e.g., "tinystories_checkpoint", "milestone_tinystories")
     checkpoint_key = os.path.basename(path)
     prev_path = _previous_checkpoints.get(checkpoint_key)
+    
+    # === PREPARE RESUME STATE (if exists) ===
+    # If rolling (resume checkpoint), we want to include the resume_state.json
+    # This file lives in the parent directory (output_dir)
+    parent_dir = os.path.dirname(path)
+    resume_file_src = os.path.join(parent_dir, "resume_state.json")
+    resume_file_dst = os.path.join(path, "resume_state.json")
     
     # === SAVE FIRST (before any deletion) ===
     os.makedirs(path, exist_ok=True)
@@ -217,9 +235,10 @@ def save_checkpoint(model, optimizer, path, step, config):
         weights_path = os.path.join(path, "weights.pt")
         torch.save(model.state_dict(), weights_path)
         
-        # Save optimizer state
-        optimizer_path = os.path.join(path, "optimizer.pt")
-        torch.save(optimizer.state_dict(), optimizer_path)
+        # Save optimizer state (ONLY if requested)
+        if save_optimizer:
+            optimizer_path = os.path.join(path, "optimizer.pt")
+            torch.save(optimizer.state_dict(), optimizer_path)
         
         # Save config
         checkpoint_config = {
@@ -235,20 +254,25 @@ def save_checkpoint(model, optimizer, path, step, config):
         config_path = os.path.join(path, "config.json")
         with open(config_path, "w") as f:
             json.dump(checkpoint_config, f, indent=2)
+            
+        # Copy resume_state.json if it exists and we are rolling (or always? harmless if always)
+        if os.path.exists(resume_file_src):
+            shutil.copy(resume_file_src, resume_file_dst)
         
         # Verify files exist
         if not os.path.exists(weights_path) or not os.path.exists(config_path):
             raise IOError("Checkpoint files were not saved correctly")
         
-        print(f"💾 Checkpoint saved: {path}")
+        print(f"💾 Checkpoint saved: {path} (Optim: {save_optimizer}, Rolling: {is_rolling})")
         save_successful = True
         
     except Exception as e:
         print(f"❌ Checkpoint save FAILED: {e}")
         save_successful = False
     
-    # === DELETE PREVIOUS ONLY IF SAVE SUCCEEDED ===
-    if save_successful and prev_path and prev_path != path and "model_" not in checkpoint_key:
+    # === DELETE PREVIOUS ONLY IF SAVE SUCCEEDED AND IS ROLLING ===
+    if save_successful and is_rolling and prev_path and prev_path != path:
+        # Double check we're not deleting a milestone by accident (based on path name convention if any, but flags should control)
         if os.path.exists(prev_path):
             try:
                 shutil.rmtree(prev_path)
@@ -256,9 +280,10 @@ def save_checkpoint(model, optimizer, path, step, config):
             except Exception as e:
                 print(f"⚠️ Could not delete previous checkpoint: {e}")
     
-    # Track this checkpoint for next deletion
+    # Track this checkpoint for next deletion ONLY IF ROLLING
     if save_successful:
-        _previous_checkpoints[checkpoint_key] = path
+        if is_rolling:
+            _previous_checkpoints[checkpoint_key] = path
         
         # Queue for background upload to HuggingFace Hub
         upload_to_hf_async(path, step)
@@ -402,6 +427,12 @@ def run_experiment():
     
     logger.log_event("CREATED", {"params": param_count}, step=0)
     
+    # Save Step-0 Checkpoint (MILESTONE: Init - Weights Only)
+    save_checkpoint(model, optimizer, # Optimizer is None here potentially? No, Phase 1 sets to None.
+                   os.path.join(CONFIG["output_dir"], "milestone_step0_init"),
+                   0, {"phase": "init"},
+                   save_optimizer=False, is_rolling=False)
+    
     # ========================================================================
     # PHASE 2: Train TinyStories (skip if already completed)
     # ========================================================================
@@ -429,8 +460,9 @@ def run_experiment():
         
         def checkpoint_fn(step):
             save_checkpoint(model, optimizer, 
-                           os.path.join(CONFIG["output_dir"], "tinystories_checkpoint"),
-                           step, {"phase": "tinystories"})
+                           os.path.join(CONFIG["output_dir"], "resume_checkpoint"),
+                           step, {"phase": "tinystories"}, 
+                           save_optimizer=True, is_rolling=True)
             save_resume_state(CONFIG["output_dir"], 2, step)
         
         final_step = train_dataset(
@@ -451,9 +483,11 @@ def run_experiment():
         phase2_time = time.time() - phase2_start
         
         # Save checkpoint
+        # Save checkpoint (MILESTONE: Weights Only, Permanent)
         save_checkpoint(model, optimizer,
-                       os.path.join(CONFIG["output_dir"], "model_tinystories"),
-                       final_step, {"phase": "tinystories_complete"})
+                       os.path.join(CONFIG["output_dir"], "milestone_tinystories"),
+                       final_step, {"phase": "tinystories_complete"},
+                       save_optimizer=False, is_rolling=False)
         
         # Save replay buffer
         replay_buffer.save(os.path.join(CONFIG["output_dir"], "replay_buffer_tinystories"))
@@ -533,6 +567,12 @@ def run_experiment():
     
     # Recreate optimizer with new parameters
     optimizer = optim.AdamW(model.parameters(), lr=CONFIG["gsm8k_lr"], weight_decay=0.01)
+
+    # Save checkpoint (MILESTONE: Expansion Init - Weights Only)
+    save_checkpoint(model, optimizer,
+                   os.path.join(CONFIG["output_dir"], "milestone_expanded_init"),
+                   final_step, {"phase": "expansion_complete"},
+                   save_optimizer=False, is_rolling=False)
     
     # ========================================================================
     # PHASE 5: Train GSM8K
@@ -554,8 +594,10 @@ def run_experiment():
     
     def checkpoint_fn_gsm8k(step):
         save_checkpoint(model, optimizer,
-                       os.path.join(CONFIG["output_dir"], "gsm8k_checkpoint"),
-                       step, {"phase": "gsm8k"})
+                       os.path.join(CONFIG["output_dir"], "resume_checkpoint"),
+                       step, {"phase": "gsm8k"},
+                       save_optimizer=True, is_rolling=True)
+        save_resume_state(CONFIG["output_dir"], 5, step)
     
     final_step = train_dataset(
         model=model,
@@ -574,19 +616,113 @@ def run_experiment():
     
     phase5_time = time.time() - phase5_start
     
-    # Save final checkpoint
+    # Save final checkpoint (MILESTONE: GSM8K Final - Weights Only)
     save_checkpoint(model, optimizer,
-                   os.path.join(CONFIG["output_dir"], "model_gsm8k"),
-                   final_step, {"phase": "gsm8k_complete"})
-    
-    # Save resume state
-    save_resume_state(CONFIG["output_dir"], 6, final_step)
+                   os.path.join(CONFIG["output_dir"], "milestone_gsm8k_final"),
+                   final_step, {"phase": "gsm8k_complete"},
+                   save_optimizer=False, is_rolling=False)
     
     experiment_log["phases"]["5_gsm8k"] = {
         "steps": final_step,
         "time_seconds": phase5_time,
         "replay_ratio": CONFIG["gsm8k_replay_ratio"],
     }
+    
+    # ========================================================================
+    # PHASE 10: Cross-Verification (Moon Landing Requirement)
+    # ========================================================================
+    print("\n" + "=" * 70)
+    print("🧪 PHASE 10: Cross-Verification (Moon Landing)")
+    print("=" * 70)
+    
+    verification_results = {}
+    
+    # Datasets for verification
+    datasets = {
+        "TinyStories": tinystories_val,  # Assuming this is defined/loaded
+        # We need to reload/ensure GSM8K test set is available correctly
+        "GSM8K": None # Will load inside loop or check availability
+    }
+    
+    # We need to verify TinyStories Val is available (it was loaded in Phase 3/6 logic?)
+    # Phase 2 defined `tinystories_train`, Phase 3/6 logic usually defines val.
+    # Let's verify and load if needed.
+    
+    # 1. Load Validation Data
+    try:
+        ts_val = load_tinystories(split='validation', max_samples=100, seq_len=CONFIG["tinystories_seq_len"], batch_size=CONFIG["tinystories_batch_size"], tokenizer_name='gpt2', vocab_size=CONFIG["vocab_size"])
+        gsm8k_test = load_gsm8k(split='test', max_samples=100, seq_len=CONFIG["gsm8k_seq_len"], batch_size=CONFIG["gsm8k_batch_size"], tokenizer_name='gpt2', vocab_size=CONFIG["vocab_size"])
+        datasets["TinyStories"] = ts_val
+        datasets["GSM8K"] = gsm8k_test
+    except Exception as e:
+        print(f"⚠️ Could not load verification datasets: {e}")
+    
+    # Models to verify
+    checkpoints_to_verify = [
+        ("milestone_tinystories", CONFIG["tinystories_d_model"]), 
+        ("milestone_gsm8k_final", CONFIG["gsm8k_d_model"])
+    ]
+    
+    for ckpt_name, d_model_ckpt in checkpoints_to_verify:
+        ckpt_path = os.path.join(CONFIG["output_dir"], ckpt_name)
+        if not os.path.exists(os.path.join(ckpt_path, "weights.pt")):
+            print(f"⚠️ Checkpoint {ckpt_name} not found, skipping verification.")
+            continue
+            
+        print(f"\n🔍 Verifying Model: {ckpt_name}")
+        verification_results[ckpt_name] = {}
+        
+        # Load Model
+        try:
+            # We need to re-init model with correct size
+            # TinyStories model is small (d_model=384), GSM8K is expanded (d_model=1024)
+            # We must be careful about model instantiation
+            if "tinystories" in ckpt_name:
+                 # Small model params
+                 v_model = DGESimpleTransformer(
+                    vocab_size=CONFIG["vocab_size"],
+                    d_model=CONFIG["tinystories_d_model"],
+                    n_layer=CONFIG["n_layer"],
+                    n_head=CONFIG["tinystories_n_head"],
+                    max_seq_len=CONFIG["max_seq_len"]
+                 )
+            else:
+                 # Expanded model params (approximate logic, assuming GSM8K is expanded)
+                 v_model = DGESimpleTransformer(
+                     # ... this is tricky because expanded model has 1024 d_model
+                     # and expansion logic.
+                     # Better to instantiate small and EXPAND if needed?
+                     vocab_size=CONFIG["vocab_size"],
+                     d_model=CONFIG["tinystories_d_model"], # Start small
+                     n_layer=CONFIG["n_layer"],
+                     n_head=CONFIG["tinystories_n_head"],
+                     max_seq_len=CONFIG["max_seq_len"]
+                 )
+                 # Expand it
+                 v_model.expand_model(
+                     new_input_dim=CONFIG["gsm8k_d_model"],
+                     new_output_dim=CONFIG["vocab_size"],
+                     router_type='bigram', use_gradient_rescue=True,
+                     router_init_bias=0.0, gating_threshold=0.0
+                 )
+            
+            v_model.load_state_dict(torch.load(os.path.join(ckpt_path, "weights.pt")))
+            v_model = v_model.to(DEVICE)
+            v_model.eval()
+            
+            for ds_name, ds_loader in datasets.items():
+                if ds_loader:
+                    print(f"   Evaluating on {ds_name}...")
+                    ppl, loss = compute_perplexity(v_model, ds_loader, max_batches=50)
+                    print(f"   -> PPL: {ppl:.2f}, Loss: {loss:.4f}")
+                    verification_results[ckpt_name][ds_name] = {"ppl": ppl, "loss": loss}
+            
+        except Exception as e:
+            print(f"   ❌ Verification failed: {e}")
+            verification_results[ckpt_name]["error"] = str(e)
+
+    experiment_log["verification"] = verification_results
+
     
     # ========================================================================
     # PHASE 6: Evaluate TinyStories Retention
