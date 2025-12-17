@@ -1,9 +1,21 @@
 # RunPod Deployment Guide - DGE TinyStories → GSM8K
 
 
-bash -c "cd /workspace && git clone https://${GIT_TOKEN}@github.com/bofh31415/DGE.git && cd DGE/Implementation && pip install -r requirements.txt && python run_tinystories_gsm8k_chain.py"
+mkdir DGE && cd DGE
+git init
+git remote add origin https://${GIT_TOKEN}@github.com/bofh31415/DGE.git
+git config core.sparseCheckout true
+echo "Implementation/" >> .git/info/sparse-checkout
+git pull origin master
+cd Implementation
 
-
+# INSTALL & RUN (With Cache Redirect!)
+pip install -r requirements.txt
+export HF_HOME=/workspace/hf_cache
+# Use .env for tokens (See Section 3) or export manually
+# export HF_TOKEN=hf_YOUR_WRITE_TOKEN
+   
+python run_tinystories_gsm8k_chain.py
 
 ## Tokens Needed
 
@@ -42,7 +54,24 @@ cd Implementation
 pip install -r requirements.txt
 
 # 3. Run experiment (replace YOUR_HF_TOKEN)
-export HF_TOKEN=YOUR_HF_TOKEN && python run_tinystories_gsm8k_chain.py
+# 3. Secure Setup (Create .env - DO NOT SKIP)
+# Convert variable to file (safer)
+echo "HF_TOKEN=hf_YOUR_WRITE_TOKEN" > .env
+echo "HF_HOME=/workspace/hf_cache" >> .env
+
+# Verify Identity (If this fails, your token is wrong)
+pip install huggingface_hub[cli]
+huggingface-cli login --token $(grep HF_TOKEN .env | cut -d= -f2)
+
+# 4. Run Experiment
+python run_tinystories_gsm8k_chain.py
+```
+
+### ❓ Troubleshooting
+**"401 Unauthorized" or Upload Fails?**
+Run this diagnostic to check your token:
+```bash
+python -c "import os, sys; from huggingface_hub import HfApi; from dotenv import load_dotenv; load_dotenv(); t = os.environ.get('HF_TOKEN'); print('Token Present:', bool(t)); print('Auth Check:', HfApi(token=t).whoami()['name'])"
 ```
 
 Runs ~8-10 hours unattended.

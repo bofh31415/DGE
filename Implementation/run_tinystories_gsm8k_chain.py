@@ -437,6 +437,7 @@ def run_experiment():
     
     print("=" * 70)
     print("🔬 DGE EXPERIMENT: TinyStories → GSM8K Chain")
+    __version__ = "0.8.0"
     print(f"   Version: {__version__}")
     print(f"   Device: {DEVICE}")
     print("=" * 70)
