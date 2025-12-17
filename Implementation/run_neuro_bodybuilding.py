@@ -42,27 +42,25 @@ def run_experiment():
     # model.load_state_dict(torch.load("..."))
     
     # 3. Data
-    psycho_path = os.path.join("data_store", "german_psycho.jsonl")
-    if os.path.exists(psycho_path):
-        print(f"🧠 Loading German Psycho Dataset from {psycho_path}...")
-        try:
-            from transformers import AutoTokenizer
-            from torch.utils.data import DataLoader
-            import german_psycho_data
-            
-            tokenizer = AutoTokenizer.from_pretrained("gpt2")
-            tokenizer.pad_token = tokenizer.eos_token
-            
-            dataset = german_psycho_data.GermanPsychoDataset(psycho_path, tokenizer, max_length=config.seq_len)
-            dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
-            print(f"   Loaded {len(dataset)} psycho-samples.")
-        except Exception as e:
-            print(f"   Error loading psycho data: {e}. Fallback to TinyStories.")
-            dataloader = data.load_tinystories(split="train", batch_size=config.batch_size, seq_len=config.seq_len, max_samples=1000)
-    else:
-        print("Loading TinyStories...")
-        # Using a small subset/split for the experiment
-        dataloader = data.load_tinystories(split="train", batch_size=config.batch_size, seq_len=config.seq_len, max_samples=1000)
+    print("Loading Dataset (Standard Format)...")
+    try:
+        # Load the processed standard dataset
+        dataloader = data.load_local_dataset(
+            'german_psycho_train', 
+            seq_len=config.seq_len, 
+            batch_size=config.batch_size, 
+            tokenizer_name='gpt2'
+        )
+        print("✅ Loaded 'german_psycho_train'")
+    except Exception as e:
+        print(f"⚠️ Primary dataset not found or error ({e}). Using TinyStories fallback.")
+        dataloader = data.load_tinystories(
+            split='train', 
+            max_samples=1000, 
+            seq_len=config.seq_len, 
+            batch_size=config.batch_size
+        )
+
     
     # 4. Trainer
     optimizer = optim.AdamW(model.parameters(), lr=1e-4)
