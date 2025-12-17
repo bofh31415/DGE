@@ -996,37 +996,40 @@ def run_experiment():
 
 
 # ============================================================================
-# RUNPOD AUTO-TERMINATE
+# RUNPOD AUTO-STOP (PAUSE)
 # ============================================================================
 
-def terminate_runpod():
-    """Terminate the RunPod pod to avoid ongoing charges. Uses 'remove' for zero cost."""
+def stop_runpod():
+    """Stop (Pause) the RunPod pod to save compute costs but KEEP data. Uses 'stop'."""
     import subprocess
     
     pod_id = os.environ.get('RUNPOD_POD_ID')
     
     if pod_id:
         print("\n" + "=" * 70)
-        print("🛑 TERMINATING RUNPOD POD")
+        print("⏸️ STOPPING (PAUSING) RUNPOD POD")
         print("=" * 70)
         print(f"   Pod ID: {pod_id}")
-        print("   Action: REMOVE (complete deletion, zero cost)")
+        print("   Action: STOP (Pauses billing, keeps data on disk)")
         
         try:
+            # Try 'stop' command
             result = subprocess.run(
-                ["runpodctl", "remove", "pod", pod_id],
+                ["runpodctl", "stop", "pod", pod_id],
                 capture_output=True, text=True, timeout=30
             )
             if result.returncode == 0:
-                print("   ✅ Pod termination initiated!")
+                print("   ✅ Pod stop initiated! Goodbye.")
             else:
                 print(f"   ⚠️ Command returned: {result.stderr}")
+                print("   ⚠️ Please manually STOP the pod to avoid charges.")
         except FileNotFoundError:
             print("   ⚠️ runpodctl not found. Pod will continue running.")
         except Exception as e:
-            print(f"   ❌ Failed to terminate: {e}")
+            print(f"   ❌ Failed to stop: {e}")
+            print("   ⚠️ Please manually STOP the pod to avoid charges.")
     else:
-        print("\n💻 Running locally (no RUNPOD_POD_ID). Skipping pod termination.")
+        print("\n💻 Running locally (no RUNPOD_POD_ID). Skipping pod stop.")
 
 
 if __name__ == "__main__":
@@ -1042,5 +1045,6 @@ if __name__ == "__main__":
         # Wait for pending HF uploads
         shutdown_upload_worker()
         print("\n🏁 Experiment Script Completed.")
-        print("⚠️ Pod will remain running. Please STOP or TERMINATE manually to avoid costs.")
-        # terminate_runpod() # Disabled per user request (Moon Landing V2)
+        
+        # STOP the pod automatically to save money (but keep data)
+        stop_runpod()
