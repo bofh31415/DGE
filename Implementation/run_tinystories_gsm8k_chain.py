@@ -119,7 +119,7 @@ def create_chunked_archive(source_dir, output_prefix, chunk_size_mb=400):
     # 1. Zip to temporary single file using ZIP64 to support >4GB
     temp_zip = output_prefix + ".temp.zip"
     
-    with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+    with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_STORED, allowZip64=True) as zf:
         for root, dirs, files in os.walk(source_dir):
             for file in files:
                 file_path = os.path.join(root, file)
