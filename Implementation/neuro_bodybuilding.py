@@ -82,13 +82,22 @@ class NeuroTrainer:
     """
     Wraps Training Loop to inject Neuro-Bodybuilding logic.
     """
-    def __init__(self, model, dataloader, criterion, optimizer, device='cuda'):
+    def __init__(self, model, dataloader, criterion, optimizer, device='cuda', logger=None):
         self.model = model
         self.dataloader = dataloader
         self.criterion = criterion
         self.optimizer = optimizer
         self.device = device
         self.controller = GAController(model)
+        self.logger = logger  # Optional DGELogger for event tracking
+        
+        # Training history for model card generation
+        self.history = {
+            "losses": [],
+            "fitness_scores": [],
+            "sparsity_levels": [],
+            "steps": 0
+        }
         
     def train_step(self, x, y):
         # 1. Standard Forward & Backward to get Raw Gradients
@@ -162,6 +171,7 @@ class NeuroTrainer:
             if fitness > best_fitness:
                 best_fitness = fitness
                 best_mask = mask_dict
+                best_sparsity = sparsity
         
         # 4. Apply Best Mask
         if best_mask:
@@ -172,4 +182,31 @@ class NeuroTrainer:
         # 5. Optimizer Step (Modified Gradients)
         self.optimizer.step()
         
+        # 6. Log Training Event
+        self.history["steps"] += 1
+        self.history["losses"].append(loss.item())
+        self.history["fitness_scores"].append(best_fitness)
+        self.history["sparsity_levels"].append(best_sparsity if best_mask else 0.0)
+        
+        # Log to DGELogger if available
+        if self.logger and self.history["steps"] % 100 == 0:
+            self.logger.log_event("BODYBUILDING", {
+                "step": self.history["steps"],
+                "loss": loss.item(),
+                "fitness": best_fitness,
+                "sparsity": best_sparsity if best_mask else 0.0
+            }, step=self.history["steps"])
+        
         return loss.item(), best_fitness
+    
+    def get_summary(self):
+        """Return training summary for model card generation."""
+        if not self.history["losses"]:
+            return {}
+        return {
+            "total_steps": self.history["steps"],
+            "final_loss": self.history["losses"][-1],
+            "avg_fitness": sum(self.history["fitness_scores"]) / len(self.history["fitness_scores"]),
+            "avg_sparsity": sum(self.history["sparsity_levels"]) / len(self.history["sparsity_levels"]),
+            "max_sparsity": max(self.history["sparsity_levels"]),
+        }
