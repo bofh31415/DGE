@@ -82,10 +82,73 @@ CONFIG = {
     "output_dir": "models/tinystories_gsm8k_chain",
     "local_checkpoint_interval": 1000,  # Local restorepoint (fast crash recovery)
     "hf_upload_interval": 5000,         # Remote backup to HF (bandwidth efficient)
+    "git_backup_interval": 5000,        # Push logs to Git every N steps
 }
 
 # HuggingFace Hub configuration
 HF_REPO = "darealSven/dge-tinystories-gsm8k"
+
+# ============================================================================
+# GIT BACKUP FOR LOGS
+# ============================================================================
+
+def git_backup_logs(output_dir, step, commit_message=None):
+    """
+    Push experiment logs to Git repository.
+    Called at regular intervals to preserve training metrics.
+    """
+    import subprocess
+    
+    try:
+        if commit_message is None:
+            commit_message = f"Experiment logs at step {step}"
+        
+        # Add log files (exclude large model files)
+        log_patterns = [
+            f"{output_dir}/*.jsonl",
+            f"{output_dir}/*.json",
+            f"{output_dir}/experiment_log.json",
+            f"{output_dir}/dge_*.jsonl",
+        ]
+        
+        # Git add (only logs, not weights)
+        for pattern in log_patterns:
+            subprocess.run(
+                ["git", "add", "-f", pattern], 
+                capture_output=True, 
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+        
+        # Commit
+        result = subprocess.run(
+            ["git", "commit", "-m", commit_message],
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        
+        if "nothing to commit" in result.stdout or result.returncode == 1:
+            safe_print(f"[GIT] No log changes to commit at step {step}")
+            return False
+        
+        # Push
+        result = subprocess.run(
+            ["git", "push", "origin", "master"],
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        
+        if result.returncode == 0:
+            safe_print(f"[GIT] Logs pushed to Git at step {step}")
+            return True
+        else:
+            safe_print(f"[GIT] Push failed: {result.stderr[:100]}")
+            return False
+            
+    except Exception as e:
+        safe_print(f"[GIT] Backup failed: {e}")
+        return False
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -650,6 +713,10 @@ def run_experiment():
                            step, {"phase": "tinystories"}, 
                            save_optimizer=True, is_rolling=True, upload_to_hf=should_upload)
             save_resume_state(CONFIG["output_dir"], 2, step)
+            
+            # Push logs to Git at git_backup_interval
+            if step % CONFIG["git_backup_interval"] == 0:
+                git_backup_logs(CONFIG["output_dir"], step, f"TinyStories training logs step {step}")
         
         final_step = train_dataset(
             model=model,
@@ -786,6 +853,10 @@ def run_experiment():
                        step, {"phase": "gsm8k"},
                        save_optimizer=True, is_rolling=True, upload_to_hf=should_upload)
         save_resume_state(CONFIG["output_dir"], 5, step)
+        
+        # Push logs to Git at git_backup_interval
+        if step % CONFIG["git_backup_interval"] == 0:
+            git_backup_logs(CONFIG["output_dir"], step, f"GSM8K training logs step {step}")
     
     final_step = train_dataset(
         model=model,
