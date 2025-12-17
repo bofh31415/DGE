@@ -550,6 +550,20 @@ def run_experiment():
         except Exception as e:
             print(f"   ⚠️ Could not load replay buffer: {e}")
     
+    # --- NEW: Check for TinyStories Restorepoint to skip Phase 2 ---
+    skip_tinystories_training = False
+    if resume_from_phase < 3 and optimizer is None:
+        # Import shared utilities
+        from hf_utils import check_for_tinystories_restorepoint
+        restorepoint_path = check_for_tinystories_restorepoint(CONFIG["output_dir"], ensure_checkpoint_restored)
+        if restorepoint_path:
+            print(f"   🔄 Using TinyStories restorepoint: {restorepoint_path}")
+            model.load_state_dict(torch.load(os.path.join(restorepoint_path, "weights.pt")))
+            model = model.to(DEVICE)
+            skip_tinystories_training = True
+            resume_from_phase = 3  # Skip to Phase 4
+            print("   ✅ Pre-trained TinyStories loaded. Skipping Phase 2.")
+    
     if optimizer is None:
         model = model.to(DEVICE)
     
@@ -573,9 +587,9 @@ def run_experiment():
                    save_optimizer=False, is_rolling=False)
     
     # ========================================================================
-    # PHASE 2: Train TinyStories (skip if already completed)
+    # PHASE 2: Train TinyStories (skip if already completed or restorepoint loaded)
     # ========================================================================
-    if resume_from_phase < 3:
+    if not skip_tinystories_training and resume_from_phase < 3:
         print("\n" + "=" * 70)
         print("📖 PHASE 2: Training on TinyStories")
         print("=" * 70)

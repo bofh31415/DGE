@@ -45,6 +45,7 @@ from run_tinystories_gsm8k_chain import (
     check_disk_space, ensure_checkpoint_restored,
     count_parameters, compute_perplexity
 )
+from hf_utils import check_for_tinystories_restorepoint, generate_model_card
 
 # ============================================================================
 # CONFIGURATION
@@ -124,18 +125,10 @@ def run_experiment():
         print(f"\n🔄 RESUME DETECTED: Phase {resume_from_phase}, Step {final_step}")
 
     # ========================================================================
-    # PHASE 1: Create/Load Model
+    # PHASE 1: Create/Load Model (Check for Restorepoints)
     # ========================================================================
     print("\n📦 PHASE 1: Model Initialization")
     
-    valid_d_model = CONFIG["tinystories_d_model"]
-    valid_n_head = CONFIG["tinystories_n_head"]
-    
-    # If resuming from late phase, assume expanded
-    if resume_from_phase >= 5:
-        valid_d_model = CONFIG["psycho_d_model"]
-        valid_n_head = CONFIG["psycho_n_head"]
-
     # Initialize Base (Small)
     model = DGESimpleTransformer(
         vocab_size=CONFIG["vocab_size"],
@@ -147,13 +140,14 @@ def run_experiment():
     
     optimizer = None
     replay_buffer = ReplayBuffer(max_size=10000, task_name="tinystories")
+    skip_tinystories_training = False
     
-    # Restore Checkpoint
+    # --- Priority 1: Check for Resume Checkpoint (Local) ---
     ckpt_path = os.path.join(CONFIG["output_dir"], "resume_checkpoint")
     if ensure_checkpoint_restored(ckpt_path):
-        print(f"   Loading checkpoint from {ckpt_path}...")
+        print(f"   Loading resume checkpoint from {ckpt_path}...")
         
-        # If expected to be expanded, expand before load
+        # If expected to be expanded (Phase 5+), expand before load
         if resume_from_phase >= 5:
             print("   Applying DGE Expansion before loading...")
             model.expand_model(
@@ -172,13 +166,29 @@ def run_experiment():
         if os.path.exists(os.path.join(ckpt_path, "optimizer.pt")):
             optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "optimizer.pt")))
         print("   ✅ Restoration Complete.")
+        
+        if resume_from_phase >= 3:
+            skip_tinystories_training = True
+    
+    # --- Priority 2: Check for TinyStories Restorepoint (Local/HF Hub) ---
+    elif resume_from_phase < 3:
+        restorepoint_path = check_for_tinystories_restorepoint(CONFIG["output_dir"], ensure_checkpoint_restored)
+        if restorepoint_path:
+            print(f"   🔄 Using TinyStories restorepoint from: {restorepoint_path}")
+            model.load_state_dict(torch.load(os.path.join(restorepoint_path, "weights.pt")))
+            model = model.to(DEVICE)
+            skip_tinystories_training = True
+            resume_from_phase = 3  # Skip to Phase 4
+            print("   ✅ TinyStories Pre-trained Model Loaded. Skipping Phase 2.")
+        else:
+            model = model.to(DEVICE)
     else:
         model = model.to(DEVICE)
 
     # ========================================================================
-    # PHASE 2: Train TinyStories (Baseline)
+    # PHASE 2: Train TinyStories (Baseline) - SKIPPED if restorepoint exists
     # ========================================================================
-    if resume_from_phase < 3:
+    if not skip_tinystories_training and resume_from_phase < 3:
         print("\n📖 PHASE 2: Training TinyStories (English Core)")
         
         ts_train = load_tinystories(
@@ -210,7 +220,7 @@ def run_experiment():
         save_checkpoint(model, optimizer, os.path.join(CONFIG["output_dir"], "milestone_tinystories"),
                        final_step, {"phase": "tinystories_complete"}, save_optimizer=False, is_rolling=False)
     else:
-        print("⏭️ Skipping Phase 2 (Completed)")
+        print("⏭️ Skipping Phase 2 (Using Restorepoint)")
 
     # ========================================================================
     # PHASE 4: Expand for German Psycho
