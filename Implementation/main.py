@@ -415,15 +415,71 @@ class DGELab:
             print(f"Loading model '{name}' with config: {config}")
             
             # Reconstruct Model
-            vocab_size = config.get('vocab_size', 1000) # Default for legacy models
+            vocab_size = config.get('vocab_size', 1000)
+            target_d_model = config['d_model']
+            
+            # V20 Fix: Handle Legacy Models w/ varying context lengths
+            # Check 'max_seq_len' first, then 'context_length', then default 128
+            max_seq_len = config.get('max_seq_len', config.get('context_length', 128))
+            
+            # 1. Attempt Base Construction
             self.model = DGESimpleTransformer(
                 vocab_size=vocab_size,
-                d_model=config['d_model'],
+                d_model=target_d_model,
                 n_layer=config['n_layer'],
-                n_head=config['n_head']
+                n_head=config['n_head'],
+                max_seq_len=max_seq_len
             )
-            # Load Weights
-            self.model.load_state_dict(torch.load(os.path.join(load_dir, 'weights.pt')))
+            
+            # Load Weights with Auto-Recovery for Expanded Models
+            try:
+                self.model.load_state_dict(torch.load(os.path.join(load_dir, 'weights.pt')))
+            except RuntimeError as e:
+                err_str = str(e)
+                # Check for Expansion Mismatch (e.g. 64 -> 96)
+                if "size mismatch" in err_str and "ln1.norms" in err_str:
+                    print("⚠️  Detected Expanded Model Architecture mismatch. Attempting Reconstructive Surgery...")
+                    
+                    # Heuristic for Seed Fund Experiment (64 -> 96)
+                    # If target is 96, we assume base was 64 (d_model=64, n_head=4 -> head_dim=16)
+                    # Wait, Seed Fund used d=64, n_head=4 -> head_dim=16. 
+                    # 96 / 16 = 6 heads.
+                    
+                    base_d_model = 64
+                    base_n_head = 4
+                    
+                    # If this is TinyStories (384 -> 1024), we handle that too
+                    if target_d_model == 1024:
+                        base_d_model = 384
+                        base_n_head = 6
+                    
+                    print(f"   Re-initializing as Base Model (d={base_d_model})...")
+                    self.model = DGESimpleTransformer(
+                        vocab_size=vocab_size,
+                        d_model=base_d_model,
+                        n_layer=config['n_layer'],
+                        n_head=base_n_head,
+                        max_seq_len=max_seq_len
+                    )
+                    
+                    # Apply Expansion
+                    print(f"   Re-applying Expansion ({base_d_model} -> {target_d_model})...")
+                    # We assume standard expansion parameters for now
+                    self.model.expand_model(
+                        new_input_dim=target_d_model,
+                        new_output_dim=0, # Assuming no vocab expansion
+                        router_type='mlp', # MATCHED: Checkpoint uses MLP router (router.0.weight)
+                        use_gradient_rescue=True,
+                        isolate_cross_terms=False 
+                    )
+                    
+                    # Retry Load
+                    print("   Retrying State Load...")
+                    self.model.load_state_dict(torch.load(os.path.join(load_dir, 'weights.pt')))
+                    print("✅  Reconstruction Successful.")
+                else:
+                    raise e
+
             self.model_name = name
             self.trained_skills = set(config.get('trained_skills', []))
             self.global_step = config.get('global_step', 0)
@@ -439,8 +495,10 @@ class DGELab:
             self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=0.0)
             print("[OK] Model loaded successfully.")
             
-        except (ValueError, FileNotFoundError) as e:
+        except Exception as e:
             print(f"[Error] loading model: {e}")
+            import traceback
+            traceback.print_exc()
 
     def inspect_model(self):
         if self.model is None:

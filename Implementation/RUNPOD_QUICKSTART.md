@@ -50,10 +50,10 @@ echo "Implementation/" >> .git/info/sparse-checkout
 git pull origin master
 cd Implementation
 
-# 2. Install dependencies
+# 2. Install dependencies & Tools
+apt-get update && apt-get install tmux -y
 pip install -r requirements.txt
 
-# 3. Run experiment (replace YOUR_HF_TOKEN)
 # 3. Secure Setup (Create .env - DO NOT SKIP)
 # Convert variable to file (safer)
 echo "HF_TOKEN=hf_YOUR_WRITE_TOKEN" > .env
@@ -63,8 +63,15 @@ echo "HF_HOME=/workspace/hf_cache" >> .env
 pip install huggingface_hub[cli]
 huggingface-cli login --token $(grep HF_TOKEN .env | cut -d= -f2)
 
-# 4. Run Experiment
+# 4. Run Experiment (Recommended with tmux)
+# tmux prevents the script from dying if your browser disconnects.
+tmux new -s dge
+
 python run_tinystories_gsm8k_chain.py
+
+# Detach: Press Ctrl+b, then release and press d
+# Re-attach later: tmux attach -t dge
+
 ```
 
 ### ❓ Troubleshooting
@@ -86,10 +93,17 @@ huggingface-cli download darealSven/dge-tinystories-gsm8k --local-dir ./results
 
 ---
 
-## What Gets Uploaded
+## Data Persistence & Checkpoints
 
-- `experiment_results.json` (~5 KB)
-- `model_tinystories/weights.pt` (~240 MB)
-- `model_gsm8k/weights.pt` (~3.6 GB)
+**Where is data saved?**
+1. **HuggingFace (Permanent):** The script auto-uploads all checkpoints to your repo (`dge-tinystories-gsm8k`).
+2. **Pod Storage (Ephemeral):** Saved locally, but **LOST** if you Terminate the pod.
+
+**Stored Checkpoints (HF):**
+The following 4 checkpoints are permanently stored:
+1. `milestone_tinystories`: Base model (Phase 2 completion)
+2. `milestone_expanded_init`: Expanded model (Phase 4 start)
+3. `milestone_gsm8k_final`: Final model (Phase 5 completion)
+4. `resume_checkpoint`: Latest step (Rolling update for resumption)
 
 Results: https://huggingface.co/darealSven/dge-tinystories-gsm8k

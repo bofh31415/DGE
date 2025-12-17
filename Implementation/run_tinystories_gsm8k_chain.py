@@ -432,6 +432,26 @@ def load_resume_state(output_dir):
 # MAIN EXPERIMENT
 # ============================================================================
 
+def check_disk_space(required_gb=20):
+    """
+    Verifies that there is enough free disk space.
+    """
+    import shutil
+    try:
+        total, used, free = shutil.disk_usage(".")
+        free_gb = free / (2**30)
+        print(f"💾 Disk Space Check: {free_gb:.2f} GB Free")
+        
+        if free_gb < required_gb:
+            print(f"⚠️ WARNING: Low disk space! This experiment requires ~{required_gb}GB.")
+            print(f"   You only have {free_gb:.2f}GB.")
+            print("   Proceeding at your own risk (checkpoints may fail)...")
+            time.sleep(5) 
+        else:
+            print("✅ Storage Check Passed.")
+    except Exception as e:
+        print(f"⚠️ Could not check disk space: {e}")
+
 def run_experiment():
     """Run the full TinyStories → GSM8K experiment chain."""
     
@@ -440,6 +460,10 @@ def run_experiment():
     __version__ = "0.8.0"
     print(f"   Version: {__version__}")
     print(f"   Device: {DEVICE}")
+    
+    # Pre-flight Check
+    check_disk_space(20)
+    
     print("=" * 70)
     
     experiment_log = {

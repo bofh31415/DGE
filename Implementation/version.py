@@ -1,1 +1,1 @@
-__version__ = "V 0.7.0"  # Phase 8: TinyStories -> GSM8K Experiment Chain
+__version__ = "V 0.8.0"  # Phase 9: German Psycho & RunPod Safe-Guards
