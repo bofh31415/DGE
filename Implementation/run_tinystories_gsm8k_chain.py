@@ -69,9 +69,10 @@ CONFIG = {
     "gsm8k_lr": 1e-4,          # Scaled up for larger batch size (Base 5e-5 @ 8 -> 1e-4 @ 32)
     "gsm8k_replay_ratio": 0.1,  # 10% replay from TinyStories
     
-    # Paths
+    # Paths & Checkpointing
     "output_dir": "models/tinystories_gsm8k_chain",
-    "checkpoint_interval": 5000,
+    "local_checkpoint_interval": 1000,  # Local restorepoint (fast crash recovery)
+    "hf_upload_interval": 5000,         # Remote backup to HF (bandwidth efficient)
 }
 
 # HuggingFace Hub configuration
@@ -293,7 +294,7 @@ def shutdown_upload_worker():
 _previous_checkpoints = {}
 
 
-def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, is_rolling=True):
+def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, is_rolling=True, upload_to_hf=True):
     """
     Save model checkpoint with config.
     
@@ -305,6 +306,8 @@ def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, i
         config: Configuration dictionary
         save_optimizer (bool): Whether to save optimizer state. False for Milestones (weights only).
         is_rolling (bool): Whether to delete previous checkpoint of same key. True for Resume, False for Milestones.
+        upload_to_hf (bool): Whether to queue this checkpoint for HuggingFace upload. 
+                             Set False for frequent local checkpoints to save bandwidth.
     """
     import shutil
     
@@ -399,8 +402,9 @@ def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, i
         if is_rolling:
             _previous_checkpoints[checkpoint_key] = path
         
-        # Queue for background upload to HuggingFace Hub
-        upload_to_hf_async(path, step)
+        # Queue for background upload to HuggingFace Hub (only if requested)
+        if upload_to_hf:
+            upload_to_hf_async(path, step)
 
 
 def save_resume_state(output_dir, phase, step, extra_data=None):
@@ -612,10 +616,12 @@ def run_experiment():
         phase2_start = time.time()
         
         def checkpoint_fn(step):
+            # Upload to HF only at hf_upload_interval, but always save locally
+            should_upload = (step % CONFIG["hf_upload_interval"] == 0)
             save_checkpoint(model, optimizer, 
                            os.path.join(CONFIG["output_dir"], "resume_checkpoint"),
                            step, {"phase": "tinystories"}, 
-                           save_optimizer=True, is_rolling=True)
+                           save_optimizer=True, is_rolling=True, upload_to_hf=should_upload)
             save_resume_state(CONFIG["output_dir"], 2, step)
         
         final_step = train_dataset(
@@ -626,7 +632,7 @@ def run_experiment():
             logger=logger,
             start_step=final_step,
             checkpoint_fn=checkpoint_fn,
-            checkpoint_interval=CONFIG["checkpoint_interval"],
+            checkpoint_interval=CONFIG["local_checkpoint_interval"],  # Local restorepoint every 1000
             replay_buffer=replay_buffer,
             replay_ratio=0.0,  # No replay on first task
             task_name="tinystories",
@@ -746,10 +752,12 @@ def run_experiment():
     phase5_start = time.time()
     
     def checkpoint_fn_gsm8k(step):
+        # Upload to HF only at hf_upload_interval, but always save locally
+        should_upload = (step % CONFIG["hf_upload_interval"] == 0)
         save_checkpoint(model, optimizer,
                        os.path.join(CONFIG["output_dir"], "resume_checkpoint"),
                        step, {"phase": "gsm8k"},
-                       save_optimizer=True, is_rolling=True)
+                       save_optimizer=True, is_rolling=True, upload_to_hf=should_upload)
         save_resume_state(CONFIG["output_dir"], 5, step)
     
     final_step = train_dataset(
@@ -760,7 +768,7 @@ def run_experiment():
         logger=logger,
         start_step=final_step,
         checkpoint_fn=checkpoint_fn_gsm8k,
-        checkpoint_interval=CONFIG["checkpoint_interval"],
+        checkpoint_interval=CONFIG["local_checkpoint_interval"],  # Local restorepoint every 1000
         replay_buffer=replay_buffer,
         replay_ratio=CONFIG["gsm8k_replay_ratio"],
         task_name="gsm8k",

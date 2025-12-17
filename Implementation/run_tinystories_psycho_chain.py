@@ -78,9 +78,10 @@ CONFIG = {
     "psycho_lr": 1e-4,
     "psycho_replay_ratio": 0.1, # 10% English Replay to maintain core
     
-    # Paths & HuggingFace
+    # Paths & Checkpointing
     "output_dir": "models/tinystories_psycho_chain",
-    "checkpoint_interval": 2000, # More frequent checkpoints for safety
+    "local_checkpoint_interval": 1000,  # Local restorepoint (fast crash recovery)
+    "hf_upload_interval": 5000,         # Remote backup to HF (bandwidth efficient)
 }
 
 # HuggingFace Hub configuration
@@ -203,15 +204,16 @@ def run_experiment():
             optimizer = optim.AdamW(model.parameters(), lr=CONFIG["tinystories_lr"], weight_decay=0.01)
             
         def checkpoint_fn(step):
+            should_upload = (step % CONFIG["hf_upload_interval"] == 0)
             save_checkpoint(model, optimizer, os.path.join(CONFIG["output_dir"], "resume_checkpoint"),
-                           step, {"phase": "tinystories"}, save_optimizer=True, is_rolling=True)
+                           step, {"phase": "tinystories"}, save_optimizer=True, is_rolling=True, upload_to_hf=should_upload)
             save_resume_state(CONFIG["output_dir"], 2, step)
             
         final_step = train_dataset(
             model=model, dataloader=ts_train,
             epochs=CONFIG["tinystories_epochs"], optimizer=optimizer, logger=logger,
             start_step=final_step, checkpoint_fn=checkpoint_fn,
-            checkpoint_interval=CONFIG["checkpoint_interval"],
+            checkpoint_interval=CONFIG["local_checkpoint_interval"],
             replay_buffer=replay_buffer, replay_ratio=0.0,
             auto_populate_buffer=True # Save English samples for later
         )
@@ -264,15 +266,16 @@ def run_experiment():
         )
         
         def checkpoint_fn_psycho(step):
+            should_upload = (step % CONFIG["hf_upload_interval"] == 0)
             save_checkpoint(model, optimizer, os.path.join(CONFIG["output_dir"], "resume_checkpoint"),
-                           step, {"phase": "psycho"}, save_optimizer=True, is_rolling=True)
+                           step, {"phase": "psycho"}, save_optimizer=True, is_rolling=True, upload_to_hf=should_upload)
             save_resume_state(CONFIG["output_dir"], 5, step)
             
         final_step = train_dataset(
             model=model, dataloader=psycho_loader,
             epochs=CONFIG["psycho_epochs"], optimizer=optimizer, logger=logger,
             start_step=final_step, checkpoint_fn=checkpoint_fn_psycho,
-            checkpoint_interval=CONFIG["checkpoint_interval"],
+            checkpoint_interval=CONFIG["local_checkpoint_interval"],
             replay_buffer=replay_buffer, 
             replay_ratio=CONFIG["psycho_replay_ratio"], # Maintain English
             task_name="german_psycho"
