@@ -132,6 +132,7 @@ class DGELab:
             print("="*50)
             print("1. 📈 Count Up (Next Number)")
             print("2. 📉 Count Down (Previous Number)")
+            print("21. 🏋️ Neuro-Bodybuilding (Sparsity Tuning)")
             print("e. 🧠  Expand Model")
             print("f. 📊  Full Skill Benchmark")
             print("b. 🔙 Back")
@@ -180,6 +181,11 @@ class DGELab:
                                      replay_tasks=replay_list)
                 self.global_step = new_step
                 self.trained_skills.add(TaskType.COUNT_DOWN.name)
+            elif choice == '21':
+                # Neuro-Bodybuilding Experiment
+                print("\n🏋️ Launching Neuro-Bodybuilding Experiment...")
+                import subprocess
+                subprocess.run(["python", "run_neuro_bodybuilding.py"])
             elif choice == 'e':
                 self.expand_menu()
             elif choice == 'f':
