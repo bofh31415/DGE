@@ -54,7 +54,7 @@ CONFIG = {
     "tinystories_batch_size": 64,   # Increased for Speed (A40/4090 can handle this easily)
     "tinystories_seq_len": 256,     # Kept safe
     "tinystories_max_samples": None,  # None = all (~2M)
-    "tinystories_lr": 1e-4,
+    "tinystories_lr": 2e-4,         # Scaled up for larger batch size (Base 1e-4 @ 16 -> 2e-4 @ 64)
     
     # Expansion
     "expansion_delta": 640,   # 384 -> 1024
@@ -66,7 +66,7 @@ CONFIG = {
     "gsm8k_batch_size": 32,    # Increased for Speed (Expanded model ~3GB VRAM active, 24GB available)
     "gsm8k_seq_len": 256,     # Kept safe
     "gsm8k_max_samples": None,  # None = all (~7.5K)
-    "gsm8k_lr": 5e-5,
+    "gsm8k_lr": 1e-4,          # Scaled up for larger batch size (Base 5e-5 @ 8 -> 1e-4 @ 32)
     "gsm8k_replay_ratio": 0.1,  # 10% replay from TinyStories
     
     # Paths
