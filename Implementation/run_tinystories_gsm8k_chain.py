@@ -1039,10 +1039,8 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
     finally:
-        # Wait for pending HF uploads to complete
+        # Wait for pending HF uploads
         shutdown_upload_worker()
-        # ALWAYS terminate pod to avoid ongoing charges
-        terminate_runpod()
-
-
-
+        print("\n🏁 Experiment Script Completed.")
+        print("⚠️ Pod will remain running. Please STOP or TERMINATE manually to avoid costs.")
+        # terminate_runpod() # Disabled per user request (Moon Landing V2)
