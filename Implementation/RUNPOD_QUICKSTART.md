@@ -29,14 +29,19 @@ bash -c "cd /workspace && git clone https://${GIT_TOKEN}@github.com/bofh31415/DG
 ## On RunPod (copy-paste ready)
 
 ```bash
-# Clone private repo (replace YOUR_GITHUB_TOKEN)
-git clone https://YOUR_GITHUB_TOKEN@github.com/bofh31415/DGE.git
-cd DGE/Implementation
+# 1. Setup Repo (Clone ONLY Implementation dir)
+mkdir DGE && cd DGE
+git init
+git remote add origin https://YOUR_GITHUB_TOKEN@github.com/bofh31415/DGE.git
+git config core.sparseCheckout true
+echo "Implementation/" >> .git/info/sparse-checkout
+git pull origin master
+cd Implementation
 
-# Install dependencies
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# Run experiment (replace YOUR_HF_TOKEN)
+# 3. Run experiment (replace YOUR_HF_TOKEN)
 export HF_TOKEN=YOUR_HF_TOKEN && python run_tinystories_gsm8k_chain.py
 ```
 
