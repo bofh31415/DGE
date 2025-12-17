@@ -1,0 +1,45 @@
+........................Traceback (most recent call last):
+  File "C:\Users\Sven\Documents\DGE\Implementation\main.py", line 481, in load_model_by_name
+    raise e
+  File "C:\Users\Sven\Documents\DGE\Implementation\main.py", line 436, in load_model_by_name
+    self.model.load_state_dict(torch.load(os.path.join(load_dir, 'weights.pt')))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sven\AppData\Roaming\Python\Python313\site-packages\torch\nn\modules\module.py", line 2593, in load_state_dict
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: Error(s) in loading state_dict for DGESimpleTransformer:
+	size mismatch for pos_emb: copying a param with shape torch.Size([1, 1024, 16]) from checkpoint, the shape in current model is torch.Size([1, 128, 16]).
+....
+----------------------------------------------------------------------
+Ran 28 tests in 1.467s
+
+OK
+Expanding DGE Model: d_model 32 -> 64 (Heads: 4 -> 8) (Router: linear) [Rescue: True, Ortho: False, BlockDiag: False, Policy: full, Threshold: 0.0]
+Expanding Layer 0...
+Expanding Layer 1...
+Expansion Complete.
+Snapshot saved: step_000000
+Model saved to C:\Users\Sven\Documents\DGE\Implementation\tests\test_models\UnitTestModel
+Loading model 'UnitTestModel' with config: {'d_model': 16, 'n_layer': 2, 'n_head': 4, 'model_name': 'UnitTestModel', 'vocab_size': 50, 'trained_skills': [], 'global_step': 0}
+[Error] loading model: Error(s) in loading state_dict for DGESimpleTransformer:
+	size mismatch for pos_emb: copying a param with shape torch.Size([1, 1024, 16]) from checkpoint, the shape in current model is torch.Size([1, 128, 16]).
+
+[Integration] Testing V2 Chain Setup...
+Model 'dge_exp_20251217_173609' created for experiment.
+Expanding: 64 -> 80 (MLP)
+Expanding DGE Model: d_model 64 -> 80 (Heads: 4 -> 5) (Router: mlp) [Rescue: True, Ortho: False, BlockDiag: False, Policy: full, Threshold: 0.0]
+Expanding Layer 0...
+Expanding Layer 1...
+Expansion Complete.
+Running 1 epoch dry run...
+[OK] Integration Test Passed.
+[SAVE] Checkpoint saved: test_moon_landing_output\milestone_tinystories_final (Optim: False, Rolling: False)
+[ZIP] Compressing and chunking checkpoint...
+   -> Created 1 chunks.
+[SAVE] Checkpoint saved: test_moon_landing_output\resume_checkpoint (Optim: True, Rolling: True)
+[ZIP] Compressing and chunking checkpoint...
+   -> Created 1 chunks.
+[SAVE] Checkpoint saved: test_moon_landing_output\resume_checkpoint (Optim: True, Rolling: True)
+[ZIP] Compressing and chunking checkpoint...
+   -> Created 1 chunks.

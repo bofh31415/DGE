@@ -37,6 +37,15 @@ from replay_buffer import ReplayBuffer
 from data import load_tinystories, load_gsm8k
 from version import __version__
 
+# Windows console-safe print (handles Unicode emojis)
+def safe_print(msg):
+    """Print with fallback for Windows cp1252 encoding issues."""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # Strip or replace emoji characters for Windows console
+        print(msg.encode('ascii', 'replace').decode('ascii'))
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -358,11 +367,11 @@ def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, i
         if not os.path.exists(weights_path) or not os.path.exists(config_path):
             raise IOError("Checkpoint files were not saved correctly")
         
-        print(f"💾 Checkpoint saved: {path} (Optim: {save_optimizer}, Rolling: {is_rolling})")
+        safe_print(f"[SAVE] Checkpoint saved: {path} (Optim: {save_optimizer}, Rolling: {is_rolling})")
         
         # === CHUNK & COMPRESS (Moon Landing V2) ===
         # Zip and split large files to avoid HF/Git limits
-        print(f"📦 Compressing and chunking checkpoint...")
+        safe_print(f"[ZIP] Compressing and chunking checkpoint...")
         
         # 1. Create Archive (excluding json files initially? No, make_archive zips everything)
         # We want to zip `weights.pt` and `optimizer.pt`
@@ -384,7 +393,7 @@ def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, i
         save_successful = True
         
     except Exception as e:
-        print(f"❌ Checkpoint save FAILED: {e}")
+        safe_print(f"[ERROR] Checkpoint save FAILED: {e}")
         save_successful = False
     
     # === DELETE PREVIOUS ONLY IF SAVE SUCCEEDED AND IS ROLLING ===
@@ -393,9 +402,9 @@ def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, i
         if os.path.exists(prev_path):
             try:
                 shutil.rmtree(prev_path)
-                print(f"🗑️ Deleted previous checkpoint: {prev_path}")
+                safe_print(f"[DELETE] Deleted previous checkpoint: {prev_path}")
             except Exception as e:
-                print(f"⚠️ Could not delete previous checkpoint: {e}")
+                safe_print(f"[WARN] Could not delete previous checkpoint: {e}")
     
     # Track this checkpoint for next deletion ONLY IF ROLLING
     if save_successful:

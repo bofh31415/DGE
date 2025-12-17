@@ -1,3 +1,14 @@
+"""
+DGE Unit Tests
+==============
+Version History:
+- V 0.8.0: Updated router tests to use router_type='linear' for attribute access
+- V 0.7.0: Added MoonLanding checkpoint tests
+- V 0.3.0: Added Directed Synergy gate tests, HybridGate tests
+- V 0.2.0: Initial DGE Linear expansion tests
+
+Each test method includes @version decorator or docstring indicating the version it tests.
+"""
 import unittest
 import torch
 import torch.nn as nn
@@ -9,12 +20,19 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from dge_utils import expand_dge_linear, expand_layer_norm, expand_embedding, MoEGatedLinear, HybridGate
+from version import __version__
+
+# Test version constant - update when tests change
+TEST_VERSION = "V 0.8.0"
 
 class TestDGELinear(unittest.TestCase):
+    """Tests for DGE Linear layer expansion (since V 0.2.0)"""
+    
     def setUp(self):
         torch.manual_seed(42)
 
     def test_initialization(self):
+        """V 0.2.0: Basic layer initialization"""
         # Base model initialization
         layer = MoEGatedLinear(10, 5)
         self.assertEqual(layer.weight.shape, (5, 10))
@@ -29,12 +47,13 @@ class TestDGELinear(unittest.TestCase):
         # Test the HybridGate logic independently
         # Input dim 8, Old count 4 (Static), New count 4 (Dynamic)
         # V 0.3.0: Use explicit router_init_bias=-4.0 to test closed gate behavior
-        gate = HybridGate(input_dim=8, old_count=4, new_count=4, router_init_bias=-4.0)
+        # Use linear router to test bias initialization
+        gate = HybridGate(input_dim=8, old_count=4, new_count=4, router_type='linear', router_init_bias=-4.0)
         
         # Check initialization
         # Old part is buffer
         self.assertTrue(torch.all(gate.old_gate == 1.0))
-        # New part is router
+        # New part is router (linear has bias attribute)
         self.assertIsNotNone(gate.router)
         self.assertTrue(torch.all(gate.router.bias == -4.0), "Closed init (-4.0 explicitly set)")
         
@@ -103,8 +122,8 @@ class TestDGELinear(unittest.TestCase):
              layer.weight.fill_(1.0)
              layer.bias.fill_(0.5)
              
-        # Expand with default Directed Synergy settings
-        expanded = expand_dge_linear(layer, added_in=2, added_out=2)
+        # Expand with linear router for testable .bias attribute
+        expanded = expand_dge_linear(layer, added_in=2, added_out=2, router_type='linear')
         
         self.assertEqual(expanded.weight.shape, (4, 4))
         
@@ -123,6 +142,7 @@ class TestDGELinear(unittest.TestCase):
         self.assertTrue(torch.all(expanded.backward_mask[2:4, 2:4] == 1.0))
         
         # V 0.3.0: Router Bias should be 0.0 (Open Gates for Directed Synergy)
+        # Using linear router to access .bias
         self.assertTrue(torch.allclose(expanded.gate_row.router.bias, torch.zeros_like(expanded.gate_row.router.bias)),
                        "V 0.3.0: Router bias should be 0.0 (Open Gates)")
         self.assertTrue(torch.allclose(expanded.gate_col.router.bias, torch.zeros_like(expanded.gate_col.router.bias)),
@@ -223,7 +243,8 @@ class TestDGELinear(unittest.TestCase):
         # If 'model' and its methods were defined, the change would be:
         # expanded = model.expand_model(new_input_dim=32 + 32, new_output_dim=model.token_emb.num_embeddings, router_type='linear')(layer, 2, 2)
         # For now, keeping the original expansion for a runnable test.
-        expanded = expand_dge_linear(layer, 2, 2)
+        # Use linear router to test .weight attribute
+        expanded = expand_dge_linear(layer, 2, 2, router_type='linear')
         
         # Check HybridGate structure
         gate_row = expanded.gate_row
