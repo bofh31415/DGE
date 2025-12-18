@@ -680,12 +680,13 @@ class DGELab:
             print("3. 📖 Train on TinyStories (HuggingFace)")
             print("4. 🔬 TinyStories → GSM8K Chain (Paper Experiment)")
             print("5. 💪 Neuro-Bodybuilding (Sparsity Tuning)")
+            print("6. 🔤 Dynamic Vocabulary Expansion")
             print("b. 🔙 Back")
             print("q. 🚪 Exit")
             
             choice = input("\nSelect Option: ").strip().lower()
             # Remap simplified menu choices to working experiments
-            choice_map = {'1': '18', '2': '19', '3': '20', '4': '21', '5': '22'}
+            choice_map = {'1': '18', '2': '19', '3': '20', '4': '21', '5': '22', '6': '23'}
             choice = choice_map.get(choice, choice)
             
             if choice == '18':
@@ -706,6 +707,10 @@ class DGELab:
                 import run_neuro_bodybuilding
                 print("\n💪 Running Neuro-Bodybuilding (Sparsity Tuning)...")
                 run_neuro_bodybuilding.run_experiment()
+            elif choice == '23':
+                import run_vocab_expansion_experiment
+                print("\n🔤 Running Dynamic Vocabulary Expansion...")
+                run_vocab_expansion_experiment.run_experiment()
             elif choice == 'b':
                 break
             elif choice == 'q':
