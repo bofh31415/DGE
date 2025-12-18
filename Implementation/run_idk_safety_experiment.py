@@ -153,30 +153,35 @@ class DGEWithIDK(nn.Module):
         self.base_model = base_model
         self.idk_router = idk_router
         self.confidence_aggregator = ConfidenceAggregator(num_routers=2)
+        self._last_confidence = 1.0  # Cache last confidence for IDK weight
     
     def forward(self, x, return_confidence=False):
         """Forward pass with IDK routing."""
         # Get base model output
-        logits = self.base_model(x)
+        output = self.base_model(x)
         
-        # Get router confidences from gate activations
-        # For now, use a simple proxy: mean hidden state magnitude
-        # TODO: Extract actual gate activations from GatedGhostLinear
-        with torch.no_grad():
-            hidden = self.base_model.get_hidden_states(x) if hasattr(self.base_model, 'get_hidden_states') else None
+        # Handle tuple return (logits, loss)
+        if isinstance(output, tuple):
+            logits = output[0]
+        else:
+            logits = output
         
-        if hidden is not None and self.idk_router is not None:
-            # Simulate router confidences (placeholder until gate extraction is implemented)
-            batch_size, seq_len = x.shape
-            router_conf = torch.rand(batch_size, seq_len, 2).to(x.device)  # Placeholder
+        # Get REAL router confidence from gate activations
+        if hasattr(self.base_model, 'get_model_confidence'):
+            self._last_confidence = self.base_model.get_model_confidence()
+        
+        if self.idk_router is not None:
+            batch_size, seq_len, vocab_size = logits.shape
             
             # Apply IDK routing to logits (boost IDK token when uncertain)
-            max_conf = router_conf.max(dim=-1).values
-            idk_boost = torch.sigmoid((self.idk_router.threshold - max_conf) / 0.1) * 5.0
+            # Low confidence → high IDK boost
+            idk_boost = torch.sigmoid(
+                (self.idk_router.threshold - self._last_confidence) / 0.1
+            ) * 5.0
             logits[:, :, IDK_TOKEN] += idk_boost
             
             if return_confidence:
-                return logits, max_conf
+                return logits, torch.tensor(self._last_confidence)
         
         if return_confidence:
             return logits, None
@@ -187,9 +192,18 @@ class DGEWithIDK(nn.Module):
         if self.idk_router is None:
             return None
         
-        # Placeholder - will be replaced with actual gate confidence
+        # Run forward to get confidence, then calculate IDK weight
+        with torch.no_grad():
+            _ = self.forward(x)
+        
+        # Calculate IDK weight based on real confidence
+        # Low confidence → high IDK activation
+        idk_weight = torch.sigmoid(
+            torch.tensor(self.idk_router.threshold - self._last_confidence) / 0.1
+        )
+        
         batch_size, seq_len = x.shape
-        return torch.rand(batch_size, seq_len).to(x.device) * 0.5
+        return idk_weight.expand(batch_size, seq_len).to(x.device)
 
 
 # =============================================================================

@@ -558,6 +558,26 @@ class MoEGatedLinear(nn.Module):
              out = out * g_row
              
         return out
+    
+    def get_gate_confidence(self) -> float:
+        """
+        Get the current gate confidence level.
+        
+        Returns average of row and col gate activations.
+        Higher value = more confident in routing decision.
+        Used by IDK router to detect uncertainty.
+        """
+        confidences = []
+        
+        if self.gate_row is not None and hasattr(self.gate_row, 'last_mean_open'):
+            confidences.append(self.gate_row.last_mean_open.item() if torch.is_tensor(self.gate_row.last_mean_open) else self.gate_row.last_mean_open)
+        
+        if self.gate_col is not None and hasattr(self.gate_col, 'last_mean_open'):
+            confidences.append(self.gate_col.last_mean_open.item() if torch.is_tensor(self.gate_col.last_mean_open) else self.gate_col.last_mean_open)
+        
+        if confidences:
+            return sum(confidences) / len(confidences)
+        return 1.0  # Default: fully confident (no gating)
 
 def expand_dge_linear(
     layer: Union[nn.Linear, MoEGatedLinear], 

@@ -208,6 +208,27 @@ class DGESimpleTransformer(nn.Module):
         self.d_model = new_input_dim # Update d_model to the new value
         print("Expansion Complete.")
 
+    def get_model_confidence(self) -> float:
+        """
+        Get aggregate confidence from all gated layers.
+        
+        Returns mean confidence across all MoEGatedLinear layers.
+        Used by IDK router to detect overall model uncertainty.
+        
+        Returns:
+            float: Confidence level (0-1), higher = more confident
+        """
+        confidences = []
+        
+        for module in self.modules():
+            if isinstance(module, MoEGatedLinear):
+                conf = module.get_gate_confidence()
+                confidences.append(conf)
+        
+        if confidences:
+            return sum(confidences) / len(confidences)
+        return 1.0  # Default: fully confident
+
     def validate_dge_integrity(self):
         """
         Calculates detailed forensic metrics for DGE validity.
