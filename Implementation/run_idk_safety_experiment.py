@@ -213,11 +213,17 @@ def train_phase(model, optimizer, generate_fn, num_steps, phase_name):
         
         inputs, targets = generate_fn(CONFIG["batch_size"])
         
-        # Forward
+        # Forward - DGESimpleTransformer returns (logits, loss) tuple
         if hasattr(model, 'base_model'):
-            logits = model.base_model(inputs)
+            output = model.base_model(inputs)
         else:
-            logits = model(inputs)
+            output = model(inputs)
+        
+        # Handle tuple return (logits, loss)
+        if isinstance(output, tuple):
+            logits = output[0]
+        else:
+            logits = output
         
         # Get last position prediction
         last_logits = logits[:, -1, :]
@@ -299,9 +305,15 @@ def evaluate_in_distribution(model, generate_fn, task_name, num_batches=10):
             inputs, targets = generate_fn(CONFIG["batch_size"])
             
             if hasattr(model, 'base_model'):
-                logits = model.base_model(inputs)
+                output = model.base_model(inputs)
             else:
-                logits = model(inputs)
+                output = model(inputs)
+            
+            # Handle tuple return
+            if isinstance(output, tuple):
+                logits = output[0]
+            else:
+                logits = output
             
             preds = logits[:, -1, :].argmax(dim=-1)
             targets_flat = targets.squeeze(-1)
@@ -380,14 +392,13 @@ def run_experiment():
     
     old_params = sum(p.numel() for p in model.parameters())
     
-    # Expand model
-    model.expand_capacity(CONFIG["expansion_delta"])
+    # Expand model using correct method
+    new_d_model = CONFIG["d_model"] + CONFIG["expansion_delta"]
+    new_n_head = CONFIG["n_head"] * 2  # Double heads to maintain head_dim
+    model.expand_model(new_d_model, new_d_model, router_type='bigram')
     
     new_params = sum(p.numel() for p in model.parameters())
     print(f"   Expanded: {old_params:,} → {new_params:,} params")
-    
-    # Update IDK router for new d_model
-    new_d_model = CONFIG["d_model"] + CONFIG["expansion_delta"]
     if CONFIG["router_architecture"] == "hierarchical":
         idk_router = create_idk_router(
             d_model=new_d_model,
