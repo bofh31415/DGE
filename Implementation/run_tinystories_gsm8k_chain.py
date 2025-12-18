@@ -378,11 +378,20 @@ def _upload_worker():
                 break
             
             folder_path, step = task
-            print(f"☁️ [Background] Uploading {folder_path} to HF Hub...")
+            folder_name = os.path.basename(folder_path)
+            
+            # Milestones go to subfolders to preserve them; resume_checkpoint goes to root
+            if folder_name.startswith("milestone_"):
+                path_in_repo = folder_name  # e.g., "milestone_tinystories/"
+                print(f"☁️ [Background] Uploading milestone: {folder_name} to HF Hub...")
+            else:
+                path_in_repo = ""  # Root for resume_checkpoint (overwrites)
+                print(f"☁️ [Background] Uploading {folder_path} to HF Hub...")
             
             try:
                 api.upload_folder(
                     folder_path=folder_path,
+                    path_in_repo=path_in_repo,
                     repo_id=HF_REPO,
                     repo_type="model",
                     commit_message=f"Checkpoint at step {step}"
