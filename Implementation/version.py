@@ -1,1 +1,1 @@
-__version__ = "V 0.8.1"  # Fix: Verification checkpoint loading & param count logging
+__version__ = "V 0.9.1"  # IDK Safety Net router + experiment menu

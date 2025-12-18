@@ -80,12 +80,14 @@ CONFIG = {
     
     # Paths & Checkpointing
     "output_dir": "models/tinystories_psycho_chain",
-    "local_checkpoint_interval": 1000,  # Local restorepoint (fast crash recovery)
-    "hf_upload_interval": 5000,         # Remote backup to HF (bandwidth efficient)
+    "local_checkpoint_interval": 1000,
+    "hf_upload_interval": 5000,
 }
 
-# HuggingFace Hub configuration
-HF_REPO = "darealSven/dge-tinystories-german-psycho"
+# Use unified HF repo manager
+from hf_repo_manager import HFRepoManager, wait_for_uploads
+HF_MANAGER = HFRepoManager("german_psycho")
+HF_REPO = "darealSven/dge-models"
 
 # ============================================================================
 # MAIN EXPERIMENT

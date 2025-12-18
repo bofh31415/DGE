@@ -67,14 +67,18 @@ CONFIG = {
     "max_steps": 2000,
     "checkpoint_interval": 500,
     
-    # Output
+    # Output - Now uses unified repo structure
     "output_dir": "models/neuro_bodybuilding",
-    "hf_repo": "darealSven/dge-neuro-bodybuilding",
     "gpu_name": GPU_NAME,
     "vram_gb": VRAM_GB,
 }
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Use unified HF repo manager
+from hf_repo_manager import HFRepoManager, wait_for_uploads
+HF_MANAGER = HFRepoManager("neuro_bodybuilding")
+HF_REPO = "darealSven/dge-models"
 
 # ============================================================================
 # CHECKPOINTING

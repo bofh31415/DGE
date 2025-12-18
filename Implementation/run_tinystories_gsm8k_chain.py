@@ -128,8 +128,10 @@ CONFIG = {
     "vram_gb": VRAM_GB,
 }
 
-# HuggingFace Hub configuration
-HF_REPO = "darealSven/dge-tinystories-gsm8k"
+# HuggingFace Hub configuration - Now uses unified repo structure
+from hf_repo_manager import HFRepoManager, wait_for_uploads
+HF_MANAGER = HFRepoManager("tinystories_gsm8k")
+HF_REPO = "darealSven/dge-models"  # Unified repo
 
 # ============================================================================
 # GIT BACKUP FOR LOGS
@@ -314,17 +316,18 @@ def restore_chunked_archive(archive_prefix, output_dir):
 
 def ensure_checkpoint_restored(ckpt_path):
     """
-    Check if checkpoint is chunked. If so, restore it.
+    Check if checkpoint exists locally or on HF. Restore if needed.
     Returns True if weights.pt exists (or was restored), False otherwise.
+    
+    Priority: local archive > HF download
     """
     import glob
     weights_path = os.path.join(ckpt_path, "weights.pt")
     if os.path.exists(weights_path):
         return True
     
-    # Check for archive
+    # Check for local archive
     archive_prefix = os.path.join(ckpt_path, "checkpoint_archive")
-    # Check for .zip.000 or similar
     if glob.glob(archive_prefix + ".zip.*"):
         print(f"📦 Restoring chunked checkpoint: {ckpt_path}...")
         try:
@@ -334,7 +337,15 @@ def ensure_checkpoint_restored(ckpt_path):
                 return True
         except Exception as e:
             print(f"❌ Restoration failed: {e}")
-            return False
+    
+    # Try HF download using unified manager
+    try:
+        ckpt_name = os.path.basename(ckpt_path)
+        checkpoint_type = "resume" if "resume" in ckpt_name else ckpt_name.replace("milestone_", "")
+        if HF_MANAGER.ensure_local_checkpoint(ckpt_path, checkpoint_type):
+            return True
+    except Exception as e:
+        print(f"   ⚠️ HF restore attempt: {e}")
             
     return False
 
@@ -380,19 +391,21 @@ def _upload_worker():
             folder_path, step = task
             folder_name = os.path.basename(folder_path)
             
-            # Milestones go to subfolders to preserve them; resume_checkpoint goes to root
+            # UNIFIED STRUCTURE: All paths under experiment subfolder
+            experiment_folder = "tinystories_gsm8k"
+            
             if folder_name.startswith("milestone_"):
-                path_in_repo = folder_name  # e.g., "milestone_tinystories/"
+                path_in_repo = f"{experiment_folder}/{folder_name}"
                 print(f"☁️ [Background] Uploading milestone: {folder_name} to HF Hub...")
             else:
-                path_in_repo = ""  # Root for resume_checkpoint (overwrites)
+                path_in_repo = f"{experiment_folder}/resume_checkpoint"
                 print(f"☁️ [Background] Uploading {folder_path} to HF Hub...")
                 
                 # DELETE OLD CHECKPOINT ARCHIVES to prevent mixing old/new chunks
                 try:
                     from huggingface_hub import list_repo_files, delete_file
                     existing_files = list_repo_files(HF_REPO, token=hf_token)
-                    old_archives = [f for f in existing_files if "checkpoint_archive" in f and "/" not in f]
+                    old_archives = [f for f in existing_files if f.startswith(f"{experiment_folder}/resume_checkpoint/") and "checkpoint_archive" in f]
                     if old_archives:
                         print(f"☁️ [Background] Deleting {len(old_archives)} old archive chunks...")
                         for old_file in old_archives:

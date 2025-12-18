@@ -78,15 +78,18 @@ CONFIG = {
     "gate_init": -10.0,
     "gate_boost": 10.0,
     
-    # Output & HF
+    # Output & HF - Now uses unified repo structure
     "output_dir": "models/vocab_expansion_experiment",
-    "hf_repo": "darealSven/dge-vocab-expansion",
     "gpu_name": GPU_NAME,
     "vram_gb": VRAM_GB,
 }
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-HF_REPO = CONFIG["hf_repo"]
+
+# Use unified HF repo manager
+from hf_repo_manager import HFRepoManager, wait_for_uploads
+HF_MANAGER = HFRepoManager("vocab_expansion")
+HF_REPO = "darealSven/dge-models"
 
 # ============================================================================
 # CHECKPOINTING (Reuse from GSM8K chain)
