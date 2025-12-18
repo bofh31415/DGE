@@ -631,6 +631,51 @@ def run_experiment():
     start_upload_worker()
     
     # ========================================================================
+    # HF CHECKPOINT RECOVERY (Download from Hub if local not present)
+    # ========================================================================
+    resume_checkpoint_path = os.path.join(CONFIG["output_dir"], "resume_checkpoint")
+    if not os.path.exists(resume_checkpoint_path) or not os.path.exists(os.path.join(resume_checkpoint_path, "weights.pt")):
+        print(f"   🔍 No local checkpoint found. Checking HuggingFace Hub...")
+        try:
+            from huggingface_hub import hf_hub_download, list_repo_files
+            import shutil
+            
+            # Check if resume_checkpoint exists on HF
+            hf_token = os.environ.get("HF_TOKEN")
+            files = list_repo_files(HF_REPO, token=hf_token)
+            
+            # Look for weights.pt (indicates a valid checkpoint)
+            if "weights.pt" in files or any("checkpoint_archive" in f for f in files):
+                print(f"   ⬇️ Downloading checkpoint from HuggingFace: {HF_REPO}")
+                os.makedirs(resume_checkpoint_path, exist_ok=True)
+                
+                # Download chunked archives if present
+                archive_files = [f for f in files if "checkpoint_archive" in f]
+                if archive_files:
+                    print(f"   📦 Downloading {len(archive_files)} archive chunks...")
+                    for f in archive_files:
+                        local_path = hf_hub_download(HF_REPO, f, token=hf_token)
+                        shutil.copy(local_path, os.path.join(resume_checkpoint_path, os.path.basename(f)))
+                    # Will be restored by ensure_checkpoint_restored later
+                else:
+                    # Download individual files
+                    for f in ["weights.pt", "optimizer.pt", "config.json", "resume_state.json"]:
+                        if f in files:
+                            local_path = hf_hub_download(HF_REPO, f, token=hf_token)
+                            shutil.copy(local_path, os.path.join(resume_checkpoint_path, f))
+                
+                # Also download resume_state.json to output_dir if present
+                if "resume_state.json" in files:
+                    local_path = hf_hub_download(HF_REPO, "resume_state.json", token=hf_token)
+                    shutil.copy(local_path, os.path.join(CONFIG["output_dir"], "resume_state.json"))
+                
+                print(f"   ✅ Downloaded checkpoint from HuggingFace Hub")
+            else:
+                print(f"   ℹ️ No checkpoint found on HuggingFace Hub. Starting fresh.")
+        except Exception as e:
+            print(f"   ⚠️ Could not download from HF: {e}")
+    
+    # ========================================================================
     # RESUME DETECTION
     # ========================================================================
     resume_state = load_resume_state(CONFIG["output_dir"])
