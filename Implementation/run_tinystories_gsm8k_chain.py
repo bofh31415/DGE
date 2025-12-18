@@ -649,6 +649,33 @@ def run_experiment():
                 print(f"   ⬇️ Downloading checkpoint from HuggingFace: {HF_REPO}")
                 os.makedirs(resume_checkpoint_path, exist_ok=True)
                 
+                # Download config.json first to determine phase
+                if "config.json" in files:
+                    local_path = hf_hub_download(HF_REPO, "config.json", token=hf_token)
+                    shutil.copy(local_path, os.path.join(resume_checkpoint_path, "config.json"))
+                    
+                    # Read checkpoint config to determine phase/d_model
+                    with open(os.path.join(resume_checkpoint_path, "config.json"), 'r') as f:
+                        ckpt_config = json.load(f)
+                    ckpt_phase = ckpt_config.get("phase", "unknown")
+                    ckpt_d_model = ckpt_config.get("d_model", 384)
+                    ckpt_step = ckpt_config.get("step", 0)
+                    print(f"   📋 Checkpoint info: phase={ckpt_phase}, d_model={ckpt_d_model}, step={ckpt_step}")
+                    
+                    # Create resume_state.json based on checkpoint
+                    if ckpt_phase == "gsm8k" or ckpt_d_model > CONFIG["tinystories_d_model"]:
+                        resume_phase = 5  # GSM8K phase (expanded)
+                    elif ckpt_phase == "tinystories":
+                        resume_phase = 3  # After TinyStories
+                    else:
+                        resume_phase = 2  # During TinyStories
+                    
+                    # Save resume_state to output_dir
+                    resume_state_data = {"phase": resume_phase, "step": ckpt_step}
+                    with open(os.path.join(CONFIG["output_dir"], "resume_state.json"), 'w') as f:
+                        json.dump(resume_state_data, f)
+                    print(f"   📝 Created resume_state: phase={resume_phase}, step={ckpt_step}")
+                
                 # Download chunked archives if present
                 archive_files = [f for f in files if "checkpoint_archive" in f]
                 if archive_files:
@@ -659,15 +686,10 @@ def run_experiment():
                     # Will be restored by ensure_checkpoint_restored later
                 else:
                     # Download individual files
-                    for f in ["weights.pt", "optimizer.pt", "config.json", "resume_state.json"]:
+                    for f in ["weights.pt", "optimizer.pt"]:
                         if f in files:
                             local_path = hf_hub_download(HF_REPO, f, token=hf_token)
                             shutil.copy(local_path, os.path.join(resume_checkpoint_path, f))
-                
-                # Also download resume_state.json to output_dir if present
-                if "resume_state.json" in files:
-                    local_path = hf_hub_download(HF_REPO, "resume_state.json", token=hf_token)
-                    shutil.copy(local_path, os.path.join(CONFIG["output_dir"], "resume_state.json"))
                 
                 print(f"   ✅ Downloaded checkpoint from HuggingFace Hub")
             else:
