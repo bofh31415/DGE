@@ -1,1 +1,1 @@
-__version__ = "V 0.9.2"  # Real gate confidence for IDK routing
+__version__ = "V 0.9.6"  # Router0 Always IDK Architecture + Skill Management API
