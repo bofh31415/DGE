@@ -57,7 +57,7 @@ pip install -r requirements.txt
 
 # 3. Secure Setup (Create .env - DO NOT SKIP)
 # Convert variable to file (safer)
-echo "HF_TOKEN=hf_YOUR_WRITE_TOKEN" > .env
+echo "HF_TOKEN=hf_YOUR_WRITE_TOKEN_HERE" > .env
 echo "HF_HOME=/workspace/hf_cache" >> .env
 
 # Verify Identity (If this fails, your token is wrong)
