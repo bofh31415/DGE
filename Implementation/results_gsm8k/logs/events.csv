@@ -1,0 +1,4 @@
+Timestamp,Step,Event,Details
+2025-12-18T15:28:10.307488,0,CREATED,"{""code_version"": ""V 0.8.0""}"
+2025-12-18T15:30:09.035805,0,CREATED,"{""params"": 914999424}"
+2025-12-18T15:47:28.114273,34824,TRAINED_DATASET,"{""task"": ""gsm8k"", ""epochs"": 3, ""start_step"": 34122, ""end_step"": 34824, ""final_loss"": 9.486729621887207, ""duration_sec"": 554.6639378070831, ""replay_ratio"": 0.1, ""buffer_size"": 0}"

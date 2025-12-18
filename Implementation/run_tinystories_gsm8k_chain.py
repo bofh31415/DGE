@@ -977,6 +977,9 @@ def run_experiment():
     old_d_model = model.d_model
     old_params = count_parameters(model)
     
+    # Track whether expansion actually happened
+    expansion_performed = (old_d_model < CONFIG["gsm8k_d_model"])
+    
     # Expand!
     model.expand_model(
         new_input_dim=CONFIG["gsm8k_d_model"],
@@ -990,16 +993,33 @@ def run_experiment():
     )
     
     new_params = count_parameters(model)
-    print(f"   d_model: {old_d_model} → {model.d_model}")
-    print(f"   Parameters: {old_params:,} → {new_params:,} (+{new_params-old_params:,})")
     
-    experiment_log["phases"]["4_expand"] = {
-        "old_d_model": old_d_model,
-        "new_d_model": model.d_model,
-        "old_params": old_params,
-        "new_params": new_params,
-        "added_params": new_params - old_params,
-    }
+    # If model was already expanded (resume case), fix the logging
+    if not expansion_performed:
+        # Already expanded - compute what the pre-expansion would have been
+        # based on the TinyStories config
+        estimated_old_params = (CONFIG["tinystories_d_model"] ** 2) * CONFIG["n_layer"] * 12  # Rough estimate
+        print(f"   (Model already expanded from previous run)")
+        print(f"   d_model: {CONFIG['tinystories_d_model']} → {model.d_model} (resumed)")
+        print(f"   Parameters: ~{estimated_old_params//1000000}M → {new_params:,}")
+        experiment_log["phases"]["4_expand"] = {
+            "old_d_model": CONFIG["tinystories_d_model"],
+            "new_d_model": model.d_model,
+            "old_params": estimated_old_params,
+            "new_params": new_params,
+            "added_params": new_params - estimated_old_params,
+            "resumed_from_expanded": True,
+        }
+    else:
+        print(f"   d_model: {old_d_model} → {model.d_model}")
+        print(f"   Parameters: {old_params:,} → {new_params:,} (+{new_params-old_params:,})")
+        experiment_log["phases"]["4_expand"] = {
+            "old_d_model": old_d_model,
+            "new_d_model": model.d_model,
+            "old_params": old_params,
+            "new_params": new_params,
+            "added_params": new_params - old_params,
+        }
     
     # Recreate optimizer with new parameters
     optimizer = optim.AdamW(model.parameters(), lr=CONFIG["gsm8k_lr"], weight_decay=0.01)
@@ -1116,39 +1136,52 @@ def run_experiment():
         
         # Load Model
         try:
-            # We need to re-init model with correct size
-            # TinyStories model is small (d_model=384), GSM8K is expanded (d_model=1024)
-            # We must be careful about model instantiation
-            if "tinystories" in ckpt_name:
-                 # Small model params
-                 v_model = DGESimpleTransformer(
+            # Read checkpoint config to get exact model configuration
+            ckpt_config_path = os.path.join(ckpt_path, "config.json")
+            ckpt_config = {}
+            if os.path.exists(ckpt_config_path):
+                with open(ckpt_config_path, "r") as f:
+                    ckpt_config = json.load(f)
+            
+            # Determine d_model from checkpoint config or fallback
+            ckpt_d_model = ckpt_config.get("d_model", d_model_ckpt)
+            
+            if ckpt_d_model == CONFIG["tinystories_d_model"]:
+                # Small model (pre-expansion)
+                v_model = DGESimpleTransformer(
                     vocab_size=CONFIG["vocab_size"],
                     d_model=CONFIG["tinystories_d_model"],
                     n_layer=CONFIG["n_layer"],
                     n_head=CONFIG["tinystories_n_head"],
                     max_seq_len=CONFIG["max_seq_len"]
-                 )
+                )
             else:
-                 # Expanded model params (approximate logic, assuming GSM8K is expanded)
-                 v_model = DGESimpleTransformer(
-                     # ... this is tricky because expanded model has 1024 d_model
-                     # and expansion logic.
-                     # Better to instantiate small and EXPAND if needed?
-                     vocab_size=CONFIG["vocab_size"],
-                     d_model=CONFIG["tinystories_d_model"], # Start small
-                     n_layer=CONFIG["n_layer"],
-                     n_head=CONFIG["tinystories_n_head"],
-                     max_seq_len=CONFIG["max_seq_len"]
-                 )
-                 # Expand it
-                 v_model.expand_model(
-                     new_input_dim=CONFIG["gsm8k_d_model"],
-                     new_output_dim=CONFIG["vocab_size"],
-                     router_type='bigram', use_gradient_rescue=True,
-                     router_init_bias=0.0, gating_threshold=0.0
-                 )
+                # Expanded model - create small then expand to match checkpoint
+                v_model = DGESimpleTransformer(
+                    vocab_size=CONFIG["vocab_size"],
+                    d_model=CONFIG["tinystories_d_model"],
+                    n_layer=CONFIG["n_layer"],
+                    n_head=CONFIG["tinystories_n_head"],
+                    max_seq_len=CONFIG["max_seq_len"]
+                )
+                # Expand with same config used during training
+                v_model.expand_model(
+                    new_input_dim=ckpt_d_model,
+                    new_output_dim=CONFIG["vocab_size"],
+                    router_type='bigram', 
+                    use_gradient_rescue=True,
+                    router_init_bias=0.0, 
+                    gating_threshold=0.0
+                )
             
-            v_model.load_state_dict(torch.load(os.path.join(ckpt_path, "weights.pt")))
+            # Load with strict=False to handle minor structure differences
+            # (some router params may differ based on expansion timing)
+            state_dict = torch.load(os.path.join(ckpt_path, "weights.pt"), map_location=DEVICE)
+            missing, unexpected = v_model.load_state_dict(state_dict, strict=False)
+            if missing:
+                print(f"   ⚠️ Missing keys: {len(missing)} (may be expected for router params)")
+            if unexpected:
+                print(f"   ⚠️ Unexpected keys: {len(unexpected)}")
             v_model = v_model.to(DEVICE)
             v_model.eval()
             

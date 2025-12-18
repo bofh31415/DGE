@@ -1,1 +1,1 @@
-__version__ = "V 0.8.0"  # Phase 9: German Psycho & RunPod Safe-Guards
+__version__ = "V 0.8.1"  # Fix: Verification checkpoint loading & param count logging
