@@ -387,6 +387,22 @@ def _upload_worker():
             else:
                 path_in_repo = ""  # Root for resume_checkpoint (overwrites)
                 print(f"☁️ [Background] Uploading {folder_path} to HF Hub...")
+                
+                # DELETE OLD CHECKPOINT ARCHIVES to prevent mixing old/new chunks
+                try:
+                    from huggingface_hub import list_repo_files, delete_file
+                    existing_files = list_repo_files(HF_REPO, token=hf_token)
+                    old_archives = [f for f in existing_files if "checkpoint_archive" in f and "/" not in f]
+                    if old_archives:
+                        print(f"☁️ [Background] Deleting {len(old_archives)} old archive chunks...")
+                        for old_file in old_archives:
+                            try:
+                                api.delete_file(old_file, repo_id=HF_REPO, token=hf_token, 
+                                              commit_message=f"Cleanup before step {step}")
+                            except:
+                                pass  # Best effort
+                except Exception as del_err:
+                    print(f"☁️ [Background] Could not cleanup old files: {del_err}")
             
             try:
                 api.upload_folder(
