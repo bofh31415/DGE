@@ -39,3 +39,7 @@ data_store/
 !data_store/german_psycho*/*.jsonl
 !data_store/all.jsonl
 
+# Private scripts with tokens (NEVER COMMIT)
+quickstart_private.sh
+.env
+
