@@ -50,6 +50,45 @@ def safe_print(msg):
 # CONFIGURATION
 # ============================================================================
 
+def detect_gpu_config():
+    """
+    Detect GPU and VRAM, return optimal batch sizes.
+    Returns tuple: (tinystories_batch, gsm8k_batch, gpu_name, vram_gb)
+    """
+    if not torch.cuda.is_available():
+        print("⚠️ No CUDA GPU detected. Using CPU settings (very slow).")
+        return 4, 2, "CPU", 0
+    
+    gpu_name = torch.cuda.get_device_name(0)
+    vram_bytes = torch.cuda.get_device_properties(0).total_memory
+    vram_gb = vram_bytes / (1024**3)
+    
+    print(f"🖥️ GPU Detected: {gpu_name}")
+    print(f"💾 VRAM: {vram_gb:.1f} GB")
+    
+    # Dynamic batch sizes based on VRAM
+    if vram_gb >= 40:  # A40, A100-40GB, etc.
+        ts_batch, gsm8k_batch = 64, 32
+        print(f"✅ High VRAM ({vram_gb:.0f}GB): Using large batches (64/32)")
+    elif vram_gb >= 24:  # RTX 4090, A4000, etc.
+        ts_batch, gsm8k_batch = 32, 8
+        print(f"✅ Medium VRAM ({vram_gb:.0f}GB): Using medium batches (32/8)")
+    elif vram_gb >= 16:  # RTX 4080, T4, etc.
+        ts_batch, gsm8k_batch = 16, 4
+        print(f"⚠️ Limited VRAM ({vram_gb:.0f}GB): Using small batches (16/4)")
+    else:  # <16GB
+        ts_batch, gsm8k_batch = 8, 2
+        print(f"⚠️ Low VRAM ({vram_gb:.0f}GB): Using tiny batches (8/2)")
+    
+    return ts_batch, gsm8k_batch, gpu_name, vram_gb
+
+# Detect GPU and set optimal batch sizes
+TS_BATCH, GSM8K_BATCH, GPU_NAME, VRAM_GB = detect_gpu_config()
+
+# Scale learning rates with batch size
+TS_LR = 1e-4 * (TS_BATCH / 16)  # Base LR at batch 16
+GSM8K_LR = 5e-5 * (GSM8K_BATCH / 8)  # Base LR at batch 8
+
 CONFIG = {
     # Model Architecture (fixed for entire experiment)
     "vocab_size": 50257,      # GPT-2 tokenizer
@@ -60,10 +99,10 @@ CONFIG = {
     "tinystories_d_model": 384,
     "tinystories_n_head": 6,  # head_dim = 64
     "tinystories_epochs": 1,
-    "tinystories_batch_size": 64,   # A40 (48GB) can handle this
-    "tinystories_seq_len": 256,     # Kept safe
+    "tinystories_batch_size": TS_BATCH,   # Dynamic based on GPU
+    "tinystories_seq_len": 256,
     "tinystories_max_samples": None,  # None = all (~2M)
-    "tinystories_lr": 2e-4,         # Scaled for larger batch
+    "tinystories_lr": TS_LR,
     
     # Expansion
     "expansion_delta": 640,   # 384 -> 1024
@@ -72,10 +111,10 @@ CONFIG = {
     "gsm8k_d_model": 1024,    # After expansion
     "gsm8k_n_head": 16,       # head_dim = 64
     "gsm8k_epochs": 3,
-    "gsm8k_batch_size": 32,    # A40 (48GB) can handle expanded model with batch 32
-    "gsm8k_seq_len": 256,     # Kept safe
+    "gsm8k_batch_size": GSM8K_BATCH,  # Dynamic based on GPU
+    "gsm8k_seq_len": 256,
     "gsm8k_max_samples": None,  # None = all (~7.5K)
-    "gsm8k_lr": 1e-4,          # Scaled for batch size
+    "gsm8k_lr": GSM8K_LR,
     "gsm8k_replay_ratio": 0.1,  # 10% replay from TinyStories
     
     # Paths & Checkpointing
@@ -83,6 +122,10 @@ CONFIG = {
     "local_checkpoint_interval": 1000,  # Local restorepoint (fast crash recovery)
     "hf_upload_interval": 5000,         # Remote backup to HF (bandwidth efficient)
     "git_backup_interval": 5000,        # Push logs to Git every N steps
+    
+    # GPU Info (for logging)
+    "gpu_name": GPU_NAME,
+    "vram_gb": VRAM_GB,
 }
 
 # HuggingFace Hub configuration
