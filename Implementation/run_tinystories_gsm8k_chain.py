@@ -652,7 +652,8 @@ def run_experiment():
     buffer_path = os.path.join(CONFIG["output_dir"], "replay_buffer_tinystories")
     if os.path.exists(buffer_path):
         try:
-            replay_buffer = ReplayBuffer.load(buffer_path)
+            replay_buffer = ReplayBuffer(max_size=10000, task_name="tinystories")
+            replay_buffer.load(buffer_path)
             print(f"   ✅ Loaded replay buffer: {len(replay_buffer)} samples")
         except Exception as e:
             print(f"   ⚠️ Could not load replay buffer: {e}")
