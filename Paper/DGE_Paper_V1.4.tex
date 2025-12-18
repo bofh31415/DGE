@@ -1,0 +1,194 @@
+\documentclass[a4paper, 11pt]{article}
+
+% === PACKAGES ===
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{tikz}
+\usetikzlibrary{matrix,positioning,arrows.meta,calc}
+
+% === LAYOUT ===
+\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=3cm}
+
+% === THEOREMS ===
+\newtheorem{proposition}{Proposition}
+\newtheorem{definition}{Definition}
+\newtheorem{lemma}{Lemma}
+
+% === METADATA ===
+\title{\textbf{Directed Synergy: Mitigating the Plasticity-Stability Dilemma via Contextual Gating}}
+\author{Dipl.-Inf. Sven Jansen}
+\date{December 2024}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Continual learning in neural networks aims to resolve the \textbf{Plasticity-Stability Dilemma}. While strict architectural separation offers a theoretical guarantee against forgetting, our experiments suggest that in deep transformers with shared embeddings, ``Strict Separation'' is often intractable due to leakage (``Leakage Creep''). We introduce \textbf{Directed Synergy}, a framework combining architectural gating with \textbf{Asymmetric Experience Replay}. By employing \textbf{Bigram Contextual Routers} to disambiguate task states and \textbf{Structural Bias} (Zero Initialization), DGE achieves high plasticity and recovers stability to near-baseline levels on sequential skill acquisition tasks. \textbf{In our primary experiment (TinyStories $\to$ GSM8K), we achieve 99.93\% knowledge retention while successfully learning a new task domain.}
+\end{abstract}
+
+\section{Introduction}
+
+The Plasticity-Stability Dilemma remains a central challenge. We propose \textbf{Directed Synergy}, formally defined as the integration of:
+\begin{enumerate}
+    \item \textbf{Contextual Gating:} To resolve aliasing between tasks sharing identical tokens.
+    \item \textbf{Asymmetric Replay:} Freezing new capacity during replay to enforce strict boundary learning.
+    \item \textbf{Soft Separation:} Using initialization priors to bias the network towards separation without rigid locking.
+\end{enumerate}
+
+\section{Formal Problem Statement}
+
+\subsection{Context-Dependent Aliasing}
+
+\begin{definition}[Context-Dependent Aliasing]
+Aliasing occurs when two tasks $T_A, T_B$ share an input $x$, but require distinct outputs $y_A, y_B$. A router $R(x)$ with Markov order $k=0$ cannot distinguish these cases ($R(x|T_A) = R(x|T_B)$), leading to interference.
+\end{definition}
+
+\begin{proposition}[Contextual Resolution]
+A Contextual Router $R(x_t, x_{t-1})$ with Markov order $k \ge 1$ allows separation iff the transition history differs: $(x_{t-1} \to x_t)_{T_A} \neq (x_{t-1} \to x_t)_{T_B}$.
+\end{proposition}
+
+\section{Methodology: The Dual-Gate Architecture}
+
+We introduce two distinct gate types with specific functional domains:
+
+\subsection{Forward Gate (Sigmoid)}
+$G_{fwd} \in [0, 1]^{n \times k}$ controls signal visibility during inference.
+\begin{equation}
+    G_{fwd} = \sigma(\mathbf{B} + \text{Bias})
+\end{equation}
+where $\mathbf{B} = g^{row} \oplus g^{col}$ denotes the \textbf{Broadcast Addition} (Outer Sum), defined as $B_{ij} = g^{row}_i + g^{col}_j$. This rank-1 update structure reduces parameter count from $O(n \cdot k)$ to $O(n + k)$.
+
+\subsection{Backward Gate (Binary Checkpoint)}
+$G_{bwd} \in \{0, 1\}^{n \times k}$ controls plasticity during training via a gradient mask.
+\begin{equation}
+    \nabla W_{updated} = \nabla W_{raw} \odot G_{bwd} + \Psi(\nabla G)
+\end{equation}
+Where $\Psi$ (Rescue Term) is a heuristic gradient injection. If the mean gate activation $\mu(G_{fwd}) < \epsilon$ (Dead Gate), we inject positive gradient noise scaled by $\alpha$ to stimulate re-opening: $\Psi = \alpha \cdot \mathbb{I}(\mu < \epsilon)$.
+
+\section{Experimental Results}
+
+\subsection{Primary Experiment: TinyStories $\to$ GSM8K}
+
+We validated DGE on a realistic continual learning scenario: training a language model on TinyStories (creative writing), then expanding and training on GSM8K (mathematical reasoning) while measuring retention of the original capability.
+
+\subsubsection{Experimental Setup}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Base Model & 12-layer Transformer, $d_{model}=384$, 6 heads \\
+Expansion & $d_{model}: 384 \to 1024$ (267\% increase) \\
+Parameters & 255M $\to$ 915M \\
+TinyStories Training & 1 epoch, ~2M samples \\
+GSM8K Training & 3 epochs, ~7.5K samples \\
+Replay Ratio & 10\% TinyStories during GSM8K \\
+Hardware & NVIDIA A40 (44GB VRAM) \\
+Total Training Time & ~10.6 minutes GSM8K phase \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Results}
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & \textbf{Before Expansion} & \textbf{After GSM8K} & \textbf{Delta} & \textbf{Retention} \\
+\midrule
+TinyStories PPL & 1.0047 & 1.0054 & +0.0007 & \textbf{99.93\%} \\
+TinyStories Loss & 0.0047 & 0.0054 & +0.0007 & - \\
+GSM8K PPL & - & 10.56 & - & - \\
+GSM8K Loss & - & 2.36 & - & - \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Key Finding:} The model retained \textbf{99.93\%} of its TinyStories capability (measured by perplexity ratio) while successfully learning the mathematically distinct GSM8K task. This represents near-perfect knowledge retention despite:
+\begin{itemize}
+    \item A 267\% increase in model width
+    \item Training on a completely different domain (stories $\to$ math)
+    \item Only 10\% replay ratio
+\end{itemize}
+
+\subsection{Ablation: Sequential Skills (Count Up $\to$ Count Down)}
+
+We also evaluated on a synthetic task designed for maximum aliasing:
+
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Configuration} & \textbf{Replay} & \textbf{Router} & \textbf{Init} & \textbf{Plasticity} & \textbf{Stability} \\
+\midrule
+Baseline (No DGE) & None & - & - & High (1.0) & Fail (16.0) \\
+Strict Separation & None & MLP & Random & Fail (1.3) & Fail (16.4) \\
+\textbf{Directed Synergy} & \textbf{Asym.} & \textbf{Bigram} & \textbf{0.0} & \textbf{Success (1.0)} & \textbf{Success (1.98)} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Discussion}
+
+\subsection{Why 99.93\% Retention?}
+
+The exceptional retention can be attributed to three factors:
+\begin{enumerate}
+    \item \textbf{Gated Capacity Isolation:} New parameters for GSM8K are gated; old TinyStories pathways remain undisturbed.
+    \item \textbf{Asymmetric Replay:} The 10\% replay reinforces old pathways without allowing new capacity to ``steal'' credit.
+    \item \textbf{Bigram Router:} Context-aware gating routes GSM8K-style inputs to new capacity, stories to old.
+\end{enumerate}
+
+\subsection{Practical Implications}
+
+This result suggests that DGE could enable:
+\begin{itemize}
+    \item \textbf{Lifelong Learning:} Models that accumulate skills without retraining from scratch.
+    \item \textbf{Domain Expansion:} Add new capabilities (e.g., code, math) to pretrained language models.
+    \item \textbf{Efficient Fine-tuning:} Expand only the capacity needed for new tasks.
+\end{itemize}
+
+\section{Related Work}
+
+\begin{itemize}
+    \item \textbf{Regularization:} EWC (Kirkpatrick et al., 2017) and SI constrain weights but limit plasticity in deep nets.
+    \item \textbf{Replay:} GEM/A-GEM use gradients to constrain updates; DGE's Asymmetric Replay is a simplified, architecture-aware variant.
+    \item \textbf{Architecture:} Progressive Networks add capacity but lack the shared embedding efficiency of DGE.
+\end{itemize}
+
+\section{Limitations}
+
+\begin{enumerate}
+    \item \textbf{Contextual Overhead:} Bigram Routers double the input dimension size for the gating layer.
+    \item \textbf{Memory Footprint:} Full matrix expansion is memory-intensive compared to LoRA-style adapters.
+    \item \textbf{Replay Dependency:} The method still relies on a small (10\%) replay buffer.
+    \item \textbf{GSM8K Absolute Performance:} While retention is excellent, the absolute GSM8K perplexity (10.56) indicates room for improvement on the new task.
+\end{enumerate}
+
+\section{Conclusion}
+
+Directed Synergy offers a promising mitigation of the Plasticity-Stability dilemma. Our primary experiment demonstrates \textbf{99.93\% knowledge retention} when expanding from TinyStories to GSM8K, validating the core hypothesis. By acknowledging physical limitations (Leakage) and addressing logical ambiguities (Aliasing) via Contextual Gating, DGE provides a stable foundation for continual learning.
+
+\textbf{Code and models available at:} \url{https://huggingface.co/darealSven/dge-models}
+
+\bibliographystyle{plain}
+\begin{thebibliography}{9}
+\bibitem{gge} Jansen, S. (2024). Gated Ghost Expansion.
+\bibitem{ewc} Kirkpatrick, J., et al. (2017). Overcoming catastrophic forgetting in neural networks. PNAS.
+\bibitem{gem} Lopez-Paz, D. \& Ranzato, M. (2017). Gradient Episodic Memory for Continual Learning. NeurIPS.
+\bibitem{rope} Su, J., et al. (2021). RoFormer: Enhanced Transformer with Rotary Position Embedding.
+\bibitem{tinystories} Eldan, R. \& Li, Y. (2023). TinyStories: How Small Can Language Models Be and Still Speak Coherent English? arXiv.
+\bibitem{gsm8k} Cobbe, K., et al. (2021). Training Verifiers to Solve Math Word Problems. arXiv.
+\end{thebibliography}
+
+\end{document}

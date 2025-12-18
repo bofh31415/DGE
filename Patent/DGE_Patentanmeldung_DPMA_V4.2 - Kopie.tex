@@ -1,0 +1,90 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{tikz}
+\usetikzlibrary{fit}
+
+\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=3cm}
+
+\usepackage{lineno}
+
+\begin{document}
+
+% --- BESCHREIBUNG ---
+\begin{center}
+    \Large\textbf{BESCHREIBUNG}\\[0.5cm]
+\end{center}
+
+\noindent\textbf{Bezeichnung:}\\
+Hardware-nahe Vorrichtung und Verfahren zur dynamischen Speicherpartitionierung und Modell-Transformation in adaptiven Systemen mittels kontextabhängiger Signalgatterung\\[1cm]
+
+\linenumbers 
+
+\section*{Technisches Gebiet}
+Die vorliegende Erfindung betrifft das Gebiet der adaptiven Signalverarbeitung und Hardware-nahen Steuerung von Speicherressourcen in Systemen der künstlichen Intelligenz, insbesondere für autoregressive Sprachmodelle (LLMs) und generative Diffusionsmodelle.
+
+\section*{Stand der Technik}
+Bisherige Systeme leiden beim Training unter „Katastrophalem Vergessen“. Bestehende Gatter-Mechanismen zur Steuerung des Signalflusses sind zudem rechenintensiv ($O(n \cdot k)$) und unflexibel gegenüber strukturellen Modell-Erweiterungen.
+
+\section*{Darstellung der Erfindung}
+Die Erfindung löst diese Probleme durch eine asymmetrische Gatter-Logik. Ein \textbf{Kontext-Detektor (10)} analysiert zeitliche Zustandsfolgen des Eingangssignals. Dieser Detektor kann einstufig, mehrstufig oder in einer \textbf{hierarchischen Router-Architektur} organisiert sein, um komplexe Auswahlsignale für verschiedene Hierarchieebenen des Systems zu erzeugen.
+
+Die Vorrichtung ermöglicht die Erweiterung adaptiver Systeme sowohl in der \textbf{Breite} (Erhöhung der Merkmalsdimensionen) als auch in der \textbf{Tiefe} (Hinzufügen zusätzlicher Verarbeitungsschichten/Layer), wobei die \textbf{Gatter-Logik (20)} eine kontrollierte Integration neuer Parameter ohne Beeinflussung der Basiskonfiguration gewährleistet.
+
+Die Gatter-Steuerung nutzt eine rangreduzierte Broadcast-Addition ($g^{row} \oplus g^{col}$), was die Komplexität auf $O(n + k)$ reduziert. Eine integrierte \textbf{Rescue-Einheit (30)} reaktiviert bei Bedarf Pfade durch Signalinjektion. Die Signale werden in spezifische \textbf{Speichersegmente (40)} geleitet, unterteilt in einen schreibgeschützten „Frozen Core“ und eine adaptive „Expansion Area“.
+
+\section*{Beschreibung der Zeichnungen}
+Fig. 1 zeigt die schematische Hardware-Architektur der Vorrichtung (10-40).\\
+Fig. 2 verdeutlicht die rangreduzierte Gatter-Berechnung innerhalb der Logik (20).
+
+% --- PATENTANSPRÜCHE ---
+\clearpage
+\nolinenumbers
+\begin{center}
+    \Large\textbf{PATENTANSPRÜCHE}\\[0.5cm]
+\end{center}
+
+\begin{enumerate}
+    \item Signalverarbeitungsvorrichtung zur Steuerung von Speicherzugriffen, umfassend einen Kontext-Detektor (10) zur Erzeugung eines Auswahlsignals basierend auf zeitlichen Zustandsfolgen und eine asymmetrische Gatter-Logik (20) zur selektiven Schreibsperre von Speichersegmenten (40).
+    
+    \item Vorrichtung nach Anspruch 1, dadurch gekennzeichnet, dass der Kontext-Detektor (10) eine \textbf{hierarchische Struktur} aus mehreren logischen Router-Einheiten aufweist.
+    
+    \item Vorrichtung nach Anspruch 1 oder 2, gekennzeichnet durch eine Broadcast-Recheneinheit zur rangreduzierten Gatter-Steuerung mittels Vektor-Addition.
+    
+    \item Vorrichtung nach einem der Ansprüche 1 bis 3, gekennzeichnet durch eine Rescue-Einheit (30) zur aktiven Pfadreaktivierung mittels Signalinjektion.
+    
+    \item Verfahren zur Modell-Transformation, wobei Speichersegmente (40) so angesteuert werden, dass ein Modell in der \textbf{Breite oder Tiefe} durch eine „Expansion Area“ erweitert wird, während die Basiskonfiguration als „Frozen Core“ schreibgeschützt bleibt.
+\end{enumerate}
+
+% --- ZEICHNUNGEN ---
+\clearpage
+\begin{center}
+    \Large\textbf{ZEICHNUNGEN}\\[1cm]
+\end{center}
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}[node distance=2.5cm, auto, >=stealth]
+        \node (input) [draw, rectangle] {Eingang ($x_t, x_{t-1}$)};
+        \node (detektor) [draw, rectangle, below of=input] {Kontext-Detektor (10)};
+        \node (logic) [draw, rectangle, below of=detektor] {Gatter-Logik (20)};
+        \node (rescue) [draw, circle, right of=logic, node distance=4cm] {Rescue (30)};
+        \node (memory) [draw, rectangle, below of=logic] {Speichersegmente (40)};
+        \draw [->] (input) -- (detektor); \draw [->] (detektor) -- (logic);
+        \draw [->] (logic) -- (memory); \draw [->, dashed] (rescue) -- (logic);
+    \end{tikzpicture}
+    \caption*{Fig. 1: Systemarchitektur mit Kontext-Steuerung.}
+\end{figure}
+
+% --- ZUSAMMENFASSUNG ---
+\clearpage
+\begin{center}
+    \Large\textbf{ZUSAMMENFASSUNG}\\[0.5cm]
+\end{center}
+Die Erfindung betrifft eine hardware-nahe Vorrichtung zur effizienten Steuerung von Speicherressourcen. Ein Kontext-Detektor (10), der auch hierarchisch aufgebaut sein kann, erzeugt Auswahlsignale für eine asymmetrische Gatter-Logik (20). Diese nutzt rangreduzierte Berechnungen zur Ressourceneinsparung. Die Vorrichtung ermöglicht die Erweiterung von Modellen in Breite und Tiefe ohne Informationsverlust in bestehenden Speichersegmenten (40).
+
+\end{document}

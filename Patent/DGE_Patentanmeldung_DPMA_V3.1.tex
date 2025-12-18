@@ -1,0 +1,62 @@
+\documentclass[a4paper, 11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{fancyhdr}
+
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Patentanmeldung -- Directed Synergy (DGE)}
+\lhead{Sven Jansen, Dipl.-Inf.}
+\cfoot{\thepage}
+
+\section*{Zusammenfassung}
+Die Erfindung betrifft eine hardware-nahe Vorrichtung und ein Verfahren zur effizienten Steuerung von Speicherressourcen in adaptiven Signalverarbeitungssystemen[cite: 1]. Ziel ist es, die funktionale Erweiterung eines Systems zu ermöglichen, ohne bestehende Datenkonfigurationen durch ungesteuerte Schreibzugriffe zu gefährden („Katastrophales Vergessen“)[cite: 2].
+
+Die Vorrichtung umfasst einen Kontext-Detektor, der basierend auf zeitlichen Zustandsfolgen ($x_{t-1} \to x_t$) ein Auswahlsignal zur physischen Leitung des Signalflusses auf spezifische Speichersegmente erzeugt[cite: 3, 9]. Ein Kernmerkmal ist die asymmetrische Gatter-Logik, welche die Gatter-Zustände mittels einer rangreduzierten Broadcast-Addition ($g^{row} \oplus g^{col}$) berechnet[cite: 4, 10]. Dadurch wird die rechnerische Komplexität signifikant von $O(n \cdot k)$ auf $O(n + k)$ gesenkt[cite: 4]. Zusätzlich verhindert eine integrierte Rescue-Einheit das dauerhafte Einfrieren von Signalpfaden durch gezielte Signalinjektion bei Unterschreitung definierter Aktivitätsschwellenwerte[cite: 5, 11].
+
+Die Erfindung findet Anwendung in der dynamischen Speicherpartitionierung, der Modell-Kompression sowie beim selektiven Wissenstransfer zwischen autonomen Systemen[cite: 6, 7, 8]. Durch die Trennung in einen stabilisierenden „Frozen Core“ und eine adaptive „Expansion Area“ wird eine kontrollierte Modell-Transformation bei minimalem Ressourcenverbrauch ermöglicht[cite: 7].
+
+\begin{document}
+
+\begin{center}
+\Large\textbf{PATENTANMELDUNG}\\[0.5cm]
+\large beim Deutschen Patent- und Markenamt (DPMA)\\[1cm]
+\end{center}
+
+\noindent\textbf{Bezeichnung der Erfindung:}\\
+\textit{Hardware-nahe Vorrichtung und Verfahren zur dynamischen Speicherpartitionierung und Modell-Transformation in adaptiven Systemen mittels kontextabhängiger Signalgatterung}\\[0.5cm]
+
+\section{Technisches Gebiet und Problemstellung}
+Die Erfindung betrifft die effiziente Steuerung von Speicherressourcen in adaptiven Signalverarbeitungssystemen[cite: 2, 33]. Das Kernproblem besteht darin, die Funktionalität eines Systems zu erweitern oder zu transformieren, ohne die Integrität bestehender Datenkonfigurationen durch ungesteuerte Schreibzugriffe zu gefährden („Katastrophales Vergessen“)[cite: 3, 10, 39].
+
+\section{Technische Lösung}
+Die Vorrichtung löst dieses Problem durch eine Kombination aus:
+\begin{enumerate}
+    \item \textbf{Kontext-Routing:} Ein Detektor analysiert die Sequenzabfolge ($x_{t-1} \to x_t$), um den Signalfluss physisch auf spezifische Speichersegmente zu leiten[cite: 5, 18, 27, 48].
+    \item \textbf{Rangreduzierte Gatter-Steuerung:} Die Gatter-Zustände werden über eine Broadcast-Addition ($g^{row} \oplus g^{col}$) berechnet, was die Komplexität von $O(n \cdot k)$ auf $O(n + k)$ senkt[cite: 50, 51].
+    \item \textbf{Aktive Pfadreaktivierung (Rescue-Logik):} Eine Schaltung verhindert das dauerhafte Einfrieren von Signalpfaden durch gezielte Signalinjektion bei Unterschreitung von Aktivitätsschwellenwerten[cite: 53, 54].
+\end{enumerate}
+
+\section{Weitere vorteilhafte Anwendungen (Modell-Transformation)}
+Die erfindungsgemäße Vorrichtung ermöglicht über das sequentielle Training hinausgehende Transformationen von Parametermatrizen:
+\begin{itemize}
+    \item \textbf{Modell-Kompression (Downsizing):} Durch die kontextabhängige Gatterung können redundante Signalpfade identifiziert und physisch deaktiviert werden, ohne die Performance in kritischen Betriebsmodi zu reduzieren.
+    \item \textbf{Wissenstransfer (Behavior Transfer):} Die asymmetrische Schreibsteuerung erlaubt es, Verhaltensweisen eines Quell-Modells selektiv in die „Expansion Area“ eines Ziel-Modells zu projizieren [cite: 6, 22], wobei der „Frozen Core“ als stabilisierende Referenz dient[cite: 6, 35].
+    \item \textbf{Model Merging:} Die Vorrichtung kann genutzt werden, um zwei unabhängig voneinander adaptierte Systeme zu verschmelzen, indem der Kontext-Router die Interferenz zwischen den jeweiligen Speichersegmenten auflöst[cite: 24, 46, 47].
+\end{itemize}
+
+\section{Patentansprüche}
+\begin{enumerate}
+    \item \textbf{Signalverarbeitungsvorrichtung} zur Steuerung von Speicherzugriffen, umfassend einen Kontext-Detektor zur Erzeugung eines Auswahlsignals basierend auf zeitlichen Zustandsfolgen [cite: 27, 41] und eine asymmetrische Gatter-Logik zur selektiven Schreibsperre von Speichersegmenten[cite: 4, 21].
+    \item Vorrichtung nach Anspruch 1, \textbf{gekennzeichnet durch} eine Broadcast-Recheneinheit zur rangreduzierten Gatter-Steuerung[cite: 50, 51].
+    \item Vorrichtung nach Anspruch 1 oder 2, \textbf{gekennzeichnet durch} eine Rescue-Einheit zur aktiven Pfadreaktivierung mittels Signalinjektion[cite: 53, 54].
+    \item \textbf{Verfahren zur Modell-Transformation} unter Verwendung einer Vorrichtung nach den Ansprüchen 1 bis 3, wobei durch die Gatter-Logik ein selektiver Transfer oder eine Kompression von Parametereinstellungen durchgeführt wird.
+\end{enumerate}
+
+\end{document}

@@ -148,3 +148,37 @@ The optimal solution is **Directed Synergy with Contextual Gating**.
 - **Asymmetric Replay** leverages this separability to enforce strict routing policies (Close for A, Open for B).
 - **Start Open** ensures rapid plasticity.
 
+---------------------------------------------------------
+## Experiment: V 0.9.4 (RBF Routers + Infinite Expansion)
+**Date:** 2025-12-18
+**Goal:** Enable "Infinite Expansion" with OOD detection.
+
+**Key Innovations:**
+1. **Recursive Gate Structure:** `HybridGate` accepts `old_router` parameter.
+   - Expansion chains gates: `Gate_v3(old=Gate_v2(old=Gate_v1))`
+   - Input sliced to match each router's `input_dim`.
+
+2. **RBF Router for OOD:** 
+   - Gate = exp(-beta * ||x - centroid||²)
+   - `beta = 2/d` prevents high-dim lock.
+   - OOD → low activation → IDK token boost.
+
+3. **Confidence Metric:** Activity Magnitude (`mean(activation)`).
+
+**Results:**
+| Config | Retention | Plasticity | OOD IDK |
+|--------|-----------|------------|---------|
+| Bigram | 0% | 100% | 0.3% |
+| RBF + imprint | 100% | 0% | 25% |
+| RBF + full | 0% | 100% | 27% |
+| **RBF + full + Replay** | **40.6%** | **100%** | **28.2%** |
+
+**Insight:** Asymmetric Replay (router-only training on Task A with frozen weights)
+improves retention from 0% → 40.6%. Further tuning needed for full retention.
+
+**Next: Clean "Router0 Always IDK" Architecture**
+- Base model starts with frozen router0 (outputs ~0 = IDK)
+- Every skill is an expansion (add router + capacity)
+- Old routers freeze after training → no forgetting possible
+
+

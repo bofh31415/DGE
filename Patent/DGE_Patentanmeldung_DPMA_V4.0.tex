@@ -1,0 +1,105 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{tikz}
+\usetikzlibrary{fit}
+
+\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=3cm}
+
+% Zeilennummern sind beim DPMA für die Prüfung sehr hilfreich
+\usepackage{lineno}
+
+\begin{document}
+
+% --- TITELSEITE ---
+\begin{center}
+    \Large\textbf{BESCHREIBUNG}\\[0.5cm]
+\end{center}
+
+\noindent\textbf{Bezeichnung:}\\
+Hardware-nahe Vorrichtung und Verfahren zur dynamischen Speicherpartitionierung und Modell-Transformation in adaptiven Systemen mittels kontextabhängiger Signalgatterung\\[1cm]
+
+\linenumbers % Start der Zeilennummerierung für die Beschreibung
+
+\section*{Technisches Gebiet}
+Die vorliegende Erfindung betrifft das Gebiet der adaptiven Signalverarbeitung und Hardware-nahen Steuerung von Speicherressourcen. Insbesondere adressiert sie Vorrichtungen, die in der Lage sind, neue Informationen zu verarbeiten, ohne bestehende Konfigurationen zu überschreiben.
+
+\section*{Stand der Technik}
+Bisherige Systeme leiden häufig unter dem Problem des „Katastrophalen Vergessens“, bei dem neue Lernprozesse die bestehenden Speicherstrukturen unkontrolliert modifizieren. Bestehende Gatter-Mechanismen sind zudem oft rechenintensiv mit einer Komplexität von $O(n \cdot k)$.
+
+\section*{Darstellung der Erfindung}
+Die Erfindung löst dieses Problem durch eine asymmetrische Gatter-Logik. Ein Kontext-Detektor analysiert zeitliche Zustandsfolgen ($x_{t-1} \to x_t$) und steuert den Schreibzugriff auf spezifische Speichersegmente. 
+Die Gatter-Steuerung erfolgt über eine rangreduzierte Broadcast-Addition ($g^{row} \oplus g^{col}$), was die Komplexität auf $O(n + k)$ reduziert. Eine Rescue-Einheit überwacht die Aktivität und reaktiviert bei Bedarf Pfade durch Signalinjektion.
+
+\section*{Beschreibung der Zeichnungen}
+Fig. 1 zeigt die schematische Hardware-Architektur der Vorrichtung.\\
+Fig. 2 verdeutlicht die rangreduzierte Gatter-Berechnung.
+
+% --- PATENTANSPRÜCHE ---
+\clearpage
+\nolinenumbers
+\begin{center}
+    \Large\textbf{PATENTANSPRÜCHE}\\[0.5cm]
+\end{center}
+
+\begin{enumerate}
+    \item Signalverarbeitungsvorrichtung zur Steuerung von Speicherzugriffen, umfassend einen Kontext-Detektor zur Erzeugung eines Auswahlsignals basierend auf zeitlichen Zustandsfolgen und eine asymmetrische Gatter-Logik zur selektiven Schreibsperre von Speichersegmenten.
+    
+    \item Vorrichtung nach Anspruch 1, gekennzeichnet durch eine Broadcast-Recheneinheit zur rangreduzierten Gatter-Steuerung mittels Vektor-Addition.
+    
+    \item Vorrichtung nach Anspruch 1 oder 2, gekennzeichnet durch eine Rescue-Einheit zur aktiven Pfadreaktivierung mittels Signalinjektion bei Unterschreitung eines Schwellenwertes.
+    
+    \item Verfahren zur Modell-Transformation unter Verwendung einer Vorrichtung nach Anspruch 1, wobei ein Quell-Modell als „Frozen Core“ schreibgeschützt wird und Anpassungen ausschließlich in einer physisch getrennten „Expansion Area“ erfolgen.
+\end{enumerate}
+
+% --- ZEICHNUNGEN ---
+\clearpage
+\begin{center}
+    \Large\textbf{ZEICHNUNGEN}\\[1cm]
+\end{center}
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}[node distance=2.5cm, auto, >=stealth]
+        \node (input) [draw, rectangle, lw=1pt] {Eingang ($x_t, x_{t-1}$)};
+        \node (detektor) [draw, rectangle, below of=input] {Kontext-Detektor (10)};
+        \node (logic) [draw, rectangle, below of=detektor] {Gatter-Logik (20)};
+        \node (rescue) [draw, circle, right of=logic, node distance=4cm] {Rescue (30)};
+        \node (memory) [draw, rectangle, below of=logic] {Speichersegmente (40)};
+        
+        \draw [->] (input) -- (detektor);
+        \draw [->] (detektor) -- (logic);
+        \draw [->] (logic) -- (memory);
+        \draw [->, dashed] (rescue) -- (logic);
+    \end{tikzpicture}
+    \caption*{Fig. 1: Systemarchitektur mit Kontext-Steuerung.}
+\end{figure}
+
+\vspace{2cm}
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}
+        \draw[fill=gray!10] (0,2) rectangle (4,2.5) node[midway] {$g^{row} (n)$};
+        \draw[fill=gray!10] (-0.5, -0.5) rectangle (0, 1.5) node[midway, rotate=90] {$g^{col} (k)$};
+        \draw (0.5,-0.2) rectangle (3.5, 1.2);
+        \node at (2, 0.5) {Matrix $G = O(n+k)$};
+        \node at (0.25, 2.25) [circle, draw, inner sep=1pt] {+};
+    \end{tikzpicture}
+    \caption*{Fig. 2: Rangreduzierte Broadcast-Einheit.}
+\end{figure}
+
+% --- ZUSAMMENFASSUNG ---
+\clearpage
+\begin{center}
+    \Large\textbf{ZUSAMMENFASSUNG}\\[0.5cm]
+\end{center}
+
+Die Erfindung betrifft eine hardware-nahe Vorrichtung und ein Verfahren zur effizienten Steuerung von Speicherressourcen in adaptiven Signalverarbeitungssystemen. Ziel ist es, die funktionale Erweiterung eines Systems zu ermöglichen, ohne bestehende Datenkonfigurationen durch ungesteuerte Schreibzugriffe zu gefährden („Katastrophales Vergessen“).
+Die Vorrichtung umfasst einen Kontext-Detektor, der basierend auf zeitlichen Zustandsfolgen ein Auswahlsignal zur physischen Leitung des Signalflusses auf spezifische Speichersegmente erzeugt. Ein Kernmerkmal ist die asymmetrische Gatter-Logik, welche die Gatter-Zustände mittels einer rangreduzierten Broadcast-Addition berechnet. Dadurch wird die rechnerische Komplexität signifikant gesenkt. Zusätzlich verhindert eine integrierte Rescue-Einheit das dauerhafte Einfrieren von Signalpfaden durch gezielte Signalinjektion.
+
+\end{document}

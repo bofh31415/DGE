@@ -88,14 +88,19 @@ class DGEBlock(nn.Module):
         self.ln2 = expand_layer_norm(self.ln2, added_width)
 
 class DGESimpleTransformer(nn.Module):
-    def __init__(self, vocab_size=1000, d_model=64, n_layer=2, n_head=4, max_seq_len=1024):
+    def __init__(self, vocab_size=1000, d_model=64, n_layer=2, n_head=4, max_seq_len=1024, initial_gating=False, router_type='bigram'):
         super().__init__()
         self.d_model = d_model
         self.max_seq_len = max_seq_len
+        self.initial_gating = initial_gating  # V 0.9.3: Store state
+        self.router_type = router_type
+
         self.token_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Parameter(torch.zeros(1, max_seq_len, d_model))
         self.layers = nn.ModuleList([DGEBlock(d_model, n_head) for _ in range(n_layer)])
-        self.lm_head = MoEGatedLinear(d_model, vocab_size, bias=False)
+        
+        # Initialize Base Head with Gating if requested
+        self.lm_head = MoEGatedLinear(d_model, vocab_size, bias=False, initial_gating=initial_gating, router_type=router_type)
         
     def forward(self, idx, targets=None, sparsity_lambda=0.05):
         B, T = idx.size()
@@ -197,7 +202,7 @@ class DGESimpleTransformer(nn.Module):
             added_out=0, 
             frozen_core_pos=Quadrant.TOP_LEFT, 
             isolate_cross_terms=isolate_cross_terms,
-            cross_term_policy='full', # CRITICAL: Head MUST see new features!
+            cross_term_policy=cross_term_policy, # V 0.9.4: Use passed policy for retention
             router_type=router_type,
             use_gradient_rescue=use_gradient_rescue,
             use_orthogonal_init=use_orthogonal_init,

@@ -19,6 +19,7 @@ import json
 import time
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from datetime import datetime
 
@@ -52,7 +53,10 @@ CONFIG = {
     # Layer 0: IDK Meta-Router (confidence aggregation)
     # Layer 1+: Specialized routers (bigram, spatial, modality)
     "router_architecture": "hierarchical",  # 'flat' (no IDK) or 'hierarchical' (with IDK)
+    "router_architecture": "hierarchical",  # 'flat' (no IDK) or 'hierarchical' (with IDK)
     "idk_threshold": 0.3,
+    "initial_gating": True,  # V 0.9.4: Enabled with Recursive RBF Routers
+    "router_type": "rbf",    # V 0.9.4: RBF for OOD Robustness
     
     # Expansion
     "expansion_delta": 64,  # 64 → 128
@@ -372,7 +376,9 @@ def run_experiment():
         d_model=CONFIG["d_model"],
         n_layer=CONFIG["n_layer"],
         n_head=CONFIG["n_head"],
-        max_seq_len=CONFIG["max_seq_len"]
+        max_seq_len=CONFIG["max_seq_len"],
+        initial_gating=CONFIG.get("initial_gating", False),
+        router_type=CONFIG.get("router_type", 'bigram') # V 0.9.4: Support Configurable Router
     ).to(DEVICE)
     
     # Create IDK router based on architecture
@@ -409,7 +415,8 @@ def run_experiment():
     # Expand model using correct method
     new_d_model = CONFIG["d_model"] + CONFIG["expansion_delta"]
     new_n_head = CONFIG["n_head"] * 2  # Double heads to maintain head_dim
-    model.expand_model(new_d_model, new_d_model, router_type='bigram')
+    # Critical: Use negative bias to start gates closed for identity preservation
+    model.expand_model(new_d_model, new_d_model, router_type=CONFIG.get("router_type", 'bigram'), router_init_bias=-10.0, cross_term_policy='full')
     
     new_params = sum(p.numel() for p in model.parameters())
     print(f"   Expanded: {old_params:,} → {new_params:,} params")
@@ -434,6 +441,59 @@ def run_experiment():
         "Count Down"
     )
     results["phase2_count_down"] = phase2_results
+    
+    # =========================================================================
+    # PHASE 2.5: Asymmetric Replay (Router-Only Training on Task A)
+    # =========================================================================
+    print("\n🔄 Phase 2.5: Asymmetric Replay (Router Training)")
+    print("   Freezing weights, training router to CLOSE for Task A...")
+    
+    # Freeze all weights except routers
+    router_params = []
+    for name, param in model.named_parameters():
+        if 'router' in name or 'centroid' in name or 'log_beta' in name:
+            param.requires_grad = True
+            router_params.append(param)
+        else:
+            param.requires_grad = False
+    
+    # Router-only optimizer
+    router_optimizer = optim.AdamW(router_params, lr=CONFIG["lr"] * 0.5)
+    criterion = nn.CrossEntropyLoss()
+    
+    # Train router on Task A (forces gates to learn "Close for A")
+    for step in range(200):  # Shorter replay phase
+        x, y = generate_count_up_batch(CONFIG["batch_size"], CONFIG["max_seq_len"])
+        x, y = x.to(DEVICE), y.to(DEVICE)
+        
+        router_optimizer.zero_grad()
+        
+        # Forward - match train_phase logic exactly
+        output = model(x)
+        if isinstance(output, tuple):
+            logits = output[0]
+        else:
+            logits = output
+        
+        # Get last position prediction and flatten targets
+        last_logits = logits[:, -1, :]
+        targets_flat = y.squeeze(-1)
+        
+        loss = criterion(last_logits, targets_flat)
+        loss.backward()
+        router_optimizer.step()
+        
+        if (step + 1) % 50 == 0:
+            with torch.no_grad():
+                preds = last_logits.argmax(dim=-1)
+                acc = (preds == targets_flat).float().mean().item()
+            print(f"   Replay Step {step+1}/200 | Loss: {loss.item():.4f} | Acc: {acc:.2%}")
+    
+    # Unfreeze all weights for evaluation
+    for param in model.parameters():
+        param.requires_grad = True
+    
+    print("   ✅ Asymmetric Replay Complete")
     
     # =========================================================================
     # PHASE 3: Evaluate

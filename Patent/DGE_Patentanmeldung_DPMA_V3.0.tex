@@ -1,0 +1,57 @@
+\documentclass[a4paper, 11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{fancyhdr}
+
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Patentanmeldung -- DGE (Technische Speichersteuerung)}
+\lhead{Sven Jansen, Dipl.-Inf.}
+\cfoot{\thepage}
+
+\begin{document}
+
+\begin{center}
+\Large\textbf{PATENTANMELDUNG}\\[0.5cm]
+\large beim Deutschen Patent- und Markenamt (DPMA)\\[1cm]
+\end{center}
+
+\noindent\textbf{Bezeichnung der Erfindung:}\\
+\textit{Hardware-nahe Vorrichtung und Verfahren zur dynamischen Speicherpartitionierung in adaptiven Systemen mittels rangreduzierter Signalgatterung und aktiver Pfadreaktivierung}\\[0.5cm]
+
+\section{Technisches Problem}
+Die Erfindung adressiert das technische Dilemma zwischen Plastizität und Stabilität in adaptiven Rechenarchitekturen[cite: 38]. Herkömmliche Systeme leiden bei der sequenziellen Anpassung entweder unter dem Verlust bereits gespeicherter Zustände („Katastrophales Vergessen“) [cite: 10] oder unter einem prohibitiv hohen Bedarf an physikalischen Speicherbausteinen bei Systemduplizierung[cite: 12]. Das technische Problem besteht darin, eine physische Trennung von Signalpfaden im selben Speichermedium ohne statische Vollpartitionierung zu erreichen[cite: 13, 39].
+
+\section{Technische Lösung}
+Die Lösung basiert auf einer dreistufigen hardware-implementierten Steuerlogik:
+
+\begin{enumerate}
+    \item \textbf{Kontext-Router (Bigram-Einheit):} Eine Schaltung, die durch Pufferung des Vorzustands ($x_{t-1}$) ein zusammengesetztes Adress-Signal erzeugt, um logische Ambiguitäten (Aliasing) auf der physikalischen Ebene aufzulösen[cite: 17, 18, 42, 47].
+    \item \textbf{Rangreduzierte Gatter-Matrix (Broadcast-Addition):} Zur Minimierung der benötigten Logikgatter wird die Steuermatrix nicht als Vollmatrix, sondern als äußere Summe zweier Vektoren ($g^{row} \oplus g^{col}$) realisiert[cite: 50]. Dies reduziert die physikalische Komplexität von $O(n \cdot k)$ auf $O(n + k)$ und spart bis zu 90\% der Schaltfläche ein[cite: 24, 51].
+    \item \textbf{Aktive Pfad-Reaktivierung (Rescue-Logik):} Um ein dauerhaftes „Einfrieren“ notwendiger Signalpfade (Dead Gates) zu verhindern, umfasst die Vorrichtung eine Rückkopplungsschleife. Wenn der Signalfluss unter einen Schwellenwert fällt, wird eine definierte Signalinjektion ausgelöst, die die Schreibfähigkeit der betroffenen Speichersegmente kurzzeitig wiederherstellt[cite: 54].
+\end{enumerate}
+
+\section{Patentansprüche}
+
+\begin{enumerate}
+    \item \textbf{Signalverarbeitungsvorrichtung} zur Steuerung von Speicherzugriffen in adaptiven Systemen, umfassend einen Eingang für Datenströme, eine Recheneinheit und eine adressierbare Speichermatrix, \textbf{gekennzeichnet durch}:
+    \begin{itemize}
+        \item einen \textbf{Kontext-Detektor}, konfiguriert zur Erzeugung eines Auswahlsignals basierend auf der zeitlichen Abfolge mindestens zweier aufeinanderfolgender Eingangswerte[cite: 5, 48];
+        \item eine \textbf{asymmetrische Gatter-Logik}, die dazu eingerichtet ist, während einer Modifikationsphase den Schreibzugriff auf erste Speichersegmente physikalisch zu sperren, während der Schreibzugriff auf zweite, neu allokierte Speichersegmente freigegeben ist[cite: 6, 21, 52];
+        \item wobei die Steuerung der Gatter-Logik durch eine \textbf{Broadcast-Recheneinheit} erfolgt, die Gatter-Zustände durch Kombination zweier niedrigdimensionaler Vektoren generiert.
+    \end{itemize}
+
+    \item Vorrichtung nach Anspruch 1, \textbf{dadurch gekennzeichnet, dass} eine \textbf{Reaktivierungsschaltung} (Rescue-Einheit) vorgesehen ist, die die Gatter-Aktivierung überwacht und bei Unterschreitung eines Schwellenwerts ein Korrektursignal in den Rückkopplungspfad injiziert, um die Adaptionsfähigkeit gesperrter Bereiche wiederherzustellen.
+
+    \item Vorrichtung nach Anspruch 1 oder 2, \textbf{dadurch gekennzeichnet, dass} die Speichermatrix initial in einen Zustand versetzt wird, in dem die Signalübertragungswerte gegen Null streben, um eine interferenzfreie Integration neuer Segmente in den bestehenden Signalfluss zu gewährleisten[cite: 31, 44].
+    
+    \item \textbf{Computerimplementiertes Verfahren} zum Betrieb einer Vorrichtung nach den Ansprüchen 1 bis 3.
+\end{enumerate}
+
+\end{document}

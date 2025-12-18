@@ -368,22 +368,100 @@ class RBFBigramRouter(RBFRouter):
 class HybridGate(nn.Module):
     """
     A Gate that is Static (Always Open) for old indices and Dynamic (MoE) for new indices.
+    V 0.9.4: Supports 'old_router' for Recursive Expansion (Hierarchical).
     """
-    def __init__(self, input_dim: int, old_count: int, new_count: int, router_type='bigram', router_init_bias=0.0, gating_threshold: float = 0.0):
+    def __init__(self, input_dim: int, old_count: int, new_count: int, router_type='bigram', router_init_bias=0.0, gating_threshold: float = 0.0, old_router: nn.Module = None):
         super().__init__()
+        self.input_dim = input_dim # V 0.9.4: Store input dim for slicing
         self.old_count = old_count
         self.new_count = new_count
         self.router_type = router_type
         self.gating_threshold = gating_threshold
-        self.router_type = router_type
-        self.gating_threshold = gating_threshold
-        self.last_mean_open = 1.0 # Default to 1.0 to avoid zero div
-        self.rescue_strength = 10000.0 # V4/V6 Fix: Default to high strength
-        self.use_gradient_rescue = False # Default Off, enabled by expand logic
+        self.last_mean_open = 1.0 
+        self.last_confidence = 1.0 
+        self.rescue_strength = 10000.0 
+        self.use_gradient_rescue = False 
         
-        # Static Old Segment (Buffer to freeze it)
-        self.register_buffer('old_gate', torch.ones(old_count))
+        # Static Old Segment (Buffer) OR Dynamic Old Router
+        self.old_router = old_router
+        if old_router is None:
+            # Default: Static Mask (Always Open)
+            self.register_buffer('old_gate', torch.ones(old_count))
+        else:
+            # Recursive: Use the previous trained router
+            pass
+            
+        # Dynamic New Segment (Router)
+        if new_count > 0:
+            if router_type == 'rbf':
+                # V21: RBF Router for Localized Selectivity
+                # CRITICAL: Scale beta by 2/d to avoid Double-Lock in high dimensions
+                # dist_sq ~ dimensions. exp(-beta * dist_sq) -> 0 if beta too high
+                # beta=2/d: For OOD (avg dist_sq ~ d), Activity = exp(-2) ~ 0.13 < 0.3 (IDK)
+                beta_val = 2.0 / max(input_dim, 1)
+                self.router = RBFRouter(input_dim, new_count, beta_init=beta_val)
+            elif router_type == 'rbf_bigram':
+                # V23: RBF Bigram Router (Context + Selectivity)
+                beta_val = 2.0 / max(input_dim, 1)
+                self.router = RBFBigramRouter(input_dim, new_count, beta_init=beta_val)
+            elif router_type == 'bigram':
+                # V22: Bigram Contextual Router
+                self.router = BigramRouter(input_dim, new_count, router_init_bias=router_init_bias)
+            elif router_type == 'mlp':
+                # V 0.3.0: MLP Router for Non-Linear Separation
+                hidden_dim = max(16, input_dim // 4)
+                self.router = nn.Sequential(
+                    nn.Linear(input_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, new_count)
+                )
+                # Init last layer to Closed (Tunable)
+                nn.init.constant_(self.router[-1].bias, router_init_bias)
+                # V5: Zero Init (Small Noise) to guarantee gates start closed
+                nn.init.normal_(self.router[-1].weight, mean=0.0, std=0.001)
+                
+                # Also dampen the first layer to prevent massive activations
+                nn.init.normal_(self.router[0].weight, mean=0.0, std=0.01)
+                nn.init.constant_(self.router[0].bias, 0.0)
+            else:
+                # Default Linear Router
+                self.router = nn.Linear(input_dim, new_count)
+                # Initialize to Closed (Tunable)
+                nn.init.constant_(self.router.bias, router_init_bias)
+                # V5: Zero Init (Small Noise)
+                nn.init.normal_(self.router.weight, mean=0.0, std=0.001)
+        else:
+            self.router = None
+            
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [..., Input_Dim]
+        *batch_dims, current_input_dim = x.shape
         
+        # 1. Old Gate (Static or Dynamic)
+        if self.old_router is not None:
+             # Recursive Router Call
+             # Slice input to match old router's expected input dimension
+             if hasattr(self.old_router, 'input_dim'):
+                 old_in_dim = self.old_router.input_dim
+             elif hasattr(self.old_router, 'in_features'):
+                 old_in_dim = self.old_router.in_features
+             else:
+                 # Fallback/Guess?
+                 # If old_router is a HybridGate, it has input_dim (now).
+                 # If it's a wrapper, we might fail.
+                 # Heuristic: old_in_dim is usually current_input_dim - expansion?
+                 # Or just try?
+                 old_in_dim = current_input_dim # Default (no slice)
+             
+             if old_in_dim < current_input_dim:
+                 x_old = x[..., :old_in_dim]
+             else:
+                 x_old = x
+                 
+             old_part = self.old_router(x_old)
+        else:
+             old_part = self.old_gate.expand(*batch_dims, -1)
+            
         # Dynamic New Segment (Router)
         if new_count > 0:
             if router_type == 'rbf':
@@ -426,14 +504,14 @@ class HybridGate(nn.Module):
         # Handle arbitrary batch dimensions
         *batch_dims, _ = x.shape
         
-        # 1. Old Gate (Static)
-        # Reshape old_gate to [1, ..., 1, Old_Count] -> No, just broadcast to [..., Old_Count]
-        # Using expand directly on the buffer
-        # old_part = self.old_gate.expand(*batch_dims, -1) 
-        # Wait, old_gate is [Old_Count]. We want [Batch, Old_Count].
-        # View as [1, 1..., Old_Count] then expand?
-        # Simpler: just expand.
-        old_part = self.old_gate.expand(*batch_dims, -1)
+        # 1. Old Gate (Static or Dynamic)
+        if self.old_router is not None:
+             # Recursive Router Call
+             # We assume old_router is a full Gate module (HybridGate or similar) 
+             # that returns ready-to-use activations (0-1).
+             old_part = self.old_router(x)
+        else:
+             old_part = self.old_gate.expand(*batch_dims, -1)
         
         if self.new_count > 0:
             router_out = self.router(x)
@@ -497,6 +575,10 @@ class HybridGate(nn.Module):
 
             self.last_mean_open = new_part.mean().detach()
             
+            # Confidence: How active are the gates?
+            # Metric: Activation Magnitude (0.0 = IDK, 1.0 = Confident)
+            self.last_confidence = new_part.mean().detach()
+            
             return torch.cat([old_part, new_part], dim=-1)
         else:
             self.last_mean_open = torch.tensor(1.0, device=x.device)
@@ -506,7 +588,7 @@ class MoEGatedLinear(nn.Module):
     """
     V 0.2.0: Mixture-of-Experts Gated Linear Layer.
     """
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, router_type='bigram', router_init_bias=0.0, gating_threshold: float = 0.0):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, router_type='bigram', router_init_bias=0.0, gating_threshold: float = 0.0, initial_gating: bool = False):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -524,8 +606,17 @@ class MoEGatedLinear(nn.Module):
             self.register_parameter('bias', None)
             
         # V 0.2.0: Split Gate (Hybrid)
-        self.gate_row = HybridGate(in_features, out_features, 0, router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
-        self.gate_col = HybridGate(in_features, in_features, 0, router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
+        # V 0.9.3: Gated Init (Optional)
+        if initial_gating:
+            # Everything is New/Dynamic from start
+            # old_count=0, new_count=out_features
+            self.gate_row = HybridGate(in_features, 0, out_features, router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
+            self.gate_col = HybridGate(in_features, 0, in_features, router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
+        else:
+            # Default: Everything is Old/Static
+            # old_count=out_features, new_count=0
+            self.gate_row = HybridGate(in_features, out_features, 0, router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
+            self.gate_col = HybridGate(in_features, in_features, 0, router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
         
         self.register_buffer('active_mask', torch.ones(out_features, in_features))
         self.register_buffer('frozen_bias_mask', torch.ones(out_features))
@@ -563,17 +654,31 @@ class MoEGatedLinear(nn.Module):
         """
         Get the current gate confidence level.
         
-        Returns average of row and col gate activations.
-        Higher value = more confident in routing decision.
-        Used by IDK router to detect uncertainty.
+        Returns average of row and col gate confidence (distance from decision boundary).
+        Higher value = more confident (near 0 or 1).
+        Used by IDK router to detect uncertainty (near 0.5).
         """
         confidences = []
         
-        if self.gate_row is not None and hasattr(self.gate_row, 'last_mean_open'):
-            confidences.append(self.gate_row.last_mean_open.item() if torch.is_tensor(self.gate_row.last_mean_open) else self.gate_row.last_mean_open)
+        # Check Row Gate
+        if self.gate_row is not None:
+             if hasattr(self.gate_row, 'last_confidence'):
+                  val = self.gate_row.last_confidence
+                  confidences.append(val.item() if torch.is_tensor(val) else val)
+             elif hasattr(self.gate_row, 'last_mean_open'):
+                  # Fallback for old gates / initial state
+                  val = self.gate_row.last_mean_open
+                  confidences.append(val.item() if torch.is_tensor(val) else val)
         
-        if self.gate_col is not None and hasattr(self.gate_col, 'last_mean_open'):
-            confidences.append(self.gate_col.last_mean_open.item() if torch.is_tensor(self.gate_col.last_mean_open) else self.gate_col.last_mean_open)
+        # Check Col Gate
+        if self.gate_col is not None:
+             if hasattr(self.gate_col, 'last_confidence'):
+                  val = self.gate_col.last_confidence
+                  confidences.append(val.item() if torch.is_tensor(val) else val)
+             elif hasattr(self.gate_col, 'last_mean_open'):
+                  # Fallback
+                  val = self.gate_col.last_mean_open
+                  confidences.append(val.item() if torch.is_tensor(val) else val)
         
         if confidences:
             return sum(confidences) / len(confidences)
@@ -615,21 +720,76 @@ def expand_dge_linear(
     new_out = old_out + added_out
     
     # 2. Create New Layer
+    # Pass defaults first
     new_layer = MoEGatedLinear(new_in, new_out, bias=(layer.bias is not None), router_type=router_type, router_init_bias=router_init_bias, gating_threshold=gating_threshold)
     new_layer.use_gradient_rescue = use_gradient_rescue
     
-    # Defaults for initialization of new areas
-    # Initialize new gates to be OPEN to allow gradient flow to the new zero-weights.
-    # We rely SOLELY on W=0.0 for Identity Preservation.
-    # If Gates are closed (-5.0), gradients vanish (Double-Lock).
-    # Set init to 2.5 (Sigmoid(5) ~ 0.99)
-    # This part is now handled by HybridGate's internal router initialization.
-    # The `gate_row` and `gate_col` attributes of MoEGatedLinear will be HybridGate instances,
-    # not direct parameters to initialize with constant_().
-    # So, these lines should be removed or commented out if they are no longer applicable.
-    # For now, I'll keep them commented as the instruction only asked for the class name change.
-    # nn.init.constant_(new_layer.gate_row, 2.5)
-    # nn.init.constant_(new_layer.gate_col, 2.5)
+    # Recursive Expansion (Infinite Expansion):
+    # If the old layer had gates, we MUST preserve them as the "Old Router" for the new gate.
+    if isinstance(layer, MoEGatedLinear):
+        # Extract previous gates
+        # Note: input_dim for row gate is `new_in` (current total input).
+        # We pass `old_router=layer.gate_row`.
+        # HybridGate will detect `layer.gate_row.input_dim` (which is `old_in`) and slice input accordingly.
+        
+        # Row Gate (Output Selection)
+        new_layer.gate_row = HybridGate(
+            input_dim=new_in,
+            old_count=0, # We don't use static buffer, we use old_router
+            new_count=added_out, # Only new neurons get new router experts
+            router_type=router_type,
+            router_init_bias=router_init_bias,
+            gating_threshold=gating_threshold,
+            old_router=layer.gate_row
+        )
+        
+        # Col Gate (Input Selection)
+        # Input to Col Gate is also `new_in`.
+        # New experts for added inputs?
+        # If we added inputs, we have `added_in`.
+        new_layer.gate_col = HybridGate(
+            input_dim=new_in,
+            old_count=0,
+            new_count=added_in,
+            router_type=router_type,
+            router_init_bias=router_init_bias,
+            gating_threshold=gating_threshold,
+            old_router=layer.gate_col
+        )
+    else:
+        # Source was nn.Linear (Static).
+        # Normal expansion logic applies (HybridGate defaults to static old_gate).
+        # But wait, MoEGatedLinear creates HybridGate with old_count=new_out (full).
+        # And new_count=0? No.
+        # Ideally, we want old_count=old_out.
+        # MoEGatedLinear(new_in, new_out...) creates Gates with old_count=new_out, new_count=0 (Static).
+        # We need to *Split* it.
+        # This part of manual gate construction was missing in the original code!
+        # The original code relied on `MoEGatedLinear` init which makes everything static old!
+        # And we never added new routers!
+        # Ah, MoEGatedLinear init DOES NOT know about `added_out`.
+        # It assumes `new_count=0` unless we tell it.
+        # So we ALWAYS need to recreate gates here.
+        
+        # Row Gate
+        new_layer.gate_row = HybridGate(
+            input_dim=new_in,
+            old_count=old_out,
+            new_count=added_out,
+            router_type=router_type,
+            router_init_bias=router_init_bias,
+            gating_threshold=gating_threshold
+        )
+        
+        # Col Gate
+        new_layer.gate_col = HybridGate(
+            input_dim=new_in,
+            old_count=old_in,
+            new_count=added_in,
+            router_type=router_type,
+            router_init_bias=router_init_bias,
+            gating_threshold=gating_threshold
+        )
     
     # Copy weights and gates based on Quadrant
     # We also set the backward_mask: 0 for the old core (frozen), 1 for new areas.
