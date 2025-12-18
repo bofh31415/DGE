@@ -60,10 +60,10 @@ CONFIG = {
     "tinystories_d_model": 384,
     "tinystories_n_head": 6,  # head_dim = 64
     "tinystories_epochs": 1,
-    "tinystories_batch_size": 16,   # Reduced for safety (was 32)
+    "tinystories_batch_size": 64,   # A40 (48GB) can handle this
     "tinystories_seq_len": 256,     # Kept safe
     "tinystories_max_samples": None,  # None = all (~2M)
-    "tinystories_lr": 5e-5,         # Adjusted for smaller batch
+    "tinystories_lr": 2e-4,         # Scaled for larger batch
     
     # Expansion
     "expansion_delta": 640,   # 384 -> 1024
@@ -72,10 +72,10 @@ CONFIG = {
     "gsm8k_d_model": 1024,    # After expansion
     "gsm8k_n_head": 16,       # head_dim = 64
     "gsm8k_epochs": 3,
-    "gsm8k_batch_size": 4,     # CRITICAL: Expanded model needs tiny batch (was 8)
+    "gsm8k_batch_size": 32,    # A40 (48GB) can handle expanded model with batch 32
     "gsm8k_seq_len": 256,     # Kept safe
     "gsm8k_max_samples": None,  # None = all (~7.5K)
-    "gsm8k_lr": 2e-5,          # Adjusted for tiny batch
+    "gsm8k_lr": 1e-4,          # Scaled for batch size
     "gsm8k_replay_ratio": 0.1,  # 10% replay from TinyStories
     
     # Paths & Checkpointing
