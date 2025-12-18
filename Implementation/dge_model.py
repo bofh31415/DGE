@@ -213,6 +213,103 @@ class DGESimpleTransformer(nn.Module):
         self.d_model = new_input_dim # Update d_model to the new value
         print("Expansion Complete.")
 
+    # =========================================================================
+    # SKILL MANAGEMENT API (V 0.9.6: Router0 Always IDK Architecture)
+    # =========================================================================
+    
+    def expand_for_skill(self, skill_name: str, expansion_delta: int = 64, router_type: str = 'rbf') -> int:
+        """
+        Add capacity for a new skill via expansion.
+        
+        In the "Router0 Always IDK" architecture:
+        - Base model starts with frozen router0 (outputs ~0 = IDK)
+        - Each skill adds its own router + capacity
+        - After training, freeze the skill's router to lock it
+        
+        Args:
+            skill_name: Human-readable name for the skill
+            expansion_delta: Amount to expand d_model
+            router_type: Type of router ('rbf' recommended for OOD detection)
+            
+        Returns:
+            skill_id: Integer ID of the new skill (for freeze_skill)
+        """
+        # Initialize skill registry if needed
+        if not hasattr(self, '_skill_registry'):
+            self._skill_registry = {}
+            self._skill_counter = 0
+        
+        # Assign skill ID
+        skill_id = self._skill_counter
+        self._skill_counter += 1
+        
+        # Record pre-expansion state
+        old_d_model = self.d_model
+        
+        # Expand model
+        new_d_model = self.d_model + expansion_delta
+        print(f"\n🎯 Expanding for Skill '{skill_name}' (ID: {skill_id})")
+        self.expand_model(
+            new_input_dim=new_d_model,
+            new_output_dim=new_d_model,
+            router_type=router_type,
+            router_init_bias=-10.0,  # Gates start closed
+            cross_term_policy='full'
+        )
+        
+        # Register skill
+        self._skill_registry[skill_id] = {
+            'name': skill_name,
+            'old_d_model': old_d_model,
+            'new_d_model': new_d_model,
+            'router_type': router_type,
+            'frozen': False
+        }
+        
+        print(f"   Skill '{skill_name}' registered with ID {skill_id}")
+        return skill_id
+    
+    def freeze_skill(self, skill_id: int) -> None:
+        """
+        Freeze a skill's router after training.
+        
+        Once frozen, the skill's router weights become non-trainable,
+        preventing any future modifications (no forgetting possible).
+        
+        Args:
+            skill_id: ID returned by expand_for_skill
+        """
+        if not hasattr(self, '_skill_registry'):
+            raise ValueError("No skills registered. Call expand_for_skill first.")
+        
+        if skill_id not in self._skill_registry:
+            raise ValueError(f"Skill ID {skill_id} not found.")
+        
+        skill = self._skill_registry[skill_id]
+        if skill['frozen']:
+            print(f"⚠️ Skill '{skill['name']}' (ID: {skill_id}) is already frozen.")
+            return
+        
+        # Freeze all router parameters associated with this skill
+        # Strategy: Freeze routers that were added during this skill's expansion
+        # This requires tracking which routers belong to which skill.
+        # For simplicity, we freeze ALL routers up to this skill's d_model range.
+        frozen_count = 0
+        for name, param in self.named_parameters():
+            if 'router' in name or 'centroid' in name or 'log_beta' in name:
+                param.requires_grad = False
+                frozen_count += 1
+        
+        skill['frozen'] = True
+        print(f"❄️ Skill '{skill['name']}' (ID: {skill_id}) frozen. {frozen_count} router params locked.")
+    
+    def get_skill_info(self) -> dict:
+        """Get information about registered skills."""
+        if not hasattr(self, '_skill_registry'):
+            return {}
+        return self._skill_registry.copy()
+
+
     def get_model_confidence(self) -> float:
         """
         Get aggregate confidence from all gated layers.
