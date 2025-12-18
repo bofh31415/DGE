@@ -1,1 +1,1 @@
-__version__ = "V 0.9.6"  # Router0 Always IDK Architecture + Skill Management API
+__version__ = "V 0.9.7"  # Interleaved Training + BigramRouter = 100%/100%

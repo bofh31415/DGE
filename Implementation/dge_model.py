@@ -243,8 +243,9 @@ class DGESimpleTransformer(nn.Module):
         skill_id = self._skill_counter
         self._skill_counter += 1
         
-        # Record pre-expansion state
+        # Record pre-expansion state - capture param names BEFORE expansion
         old_d_model = self.d_model
+        pre_expansion_params = set(name for name, _ in self.named_parameters())
         
         # Expand model
         new_d_model = self.d_model + expansion_delta
@@ -253,28 +254,33 @@ class DGESimpleTransformer(nn.Module):
             new_input_dim=new_d_model,
             new_output_dim=new_d_model,
             router_type=router_type,
-            router_init_bias=-10.0,  # Gates start closed
+            router_init_bias=0.0,  # V 0.9.7: Gates start OPEN for plasticity
             cross_term_policy='full'
         )
         
-        # Register skill
+        # Capture NEW params created during expansion
+        post_expansion_params = set(name for name, _ in self.named_parameters())
+        new_params = post_expansion_params - pre_expansion_params
+        
+        # Register skill with its specific params
         self._skill_registry[skill_id] = {
             'name': skill_name,
             'old_d_model': old_d_model,
             'new_d_model': new_d_model,
             'router_type': router_type,
-            'frozen': False
+            'frozen': False,
+            'params': new_params  # Track which params belong to this skill
         }
         
-        print(f"   Skill '{skill_name}' registered with ID {skill_id}")
+        print(f"   Skill '{skill_name}' registered with ID {skill_id} ({len(new_params)} new params)")
         return skill_id
     
     def freeze_skill(self, skill_id: int) -> None:
         """
         Freeze a skill's router after training.
         
-        Once frozen, the skill's router weights become non-trainable,
-        preventing any future modifications (no forgetting possible).
+        Once frozen, ONLY this skill's router weights become non-trainable,
+        preventing forgetting while allowing future skills to learn.
         
         Args:
             skill_id: ID returned by expand_for_skill
@@ -290,13 +296,11 @@ class DGESimpleTransformer(nn.Module):
             print(f"⚠️ Skill '{skill['name']}' (ID: {skill_id}) is already frozen.")
             return
         
-        # Freeze all router parameters associated with this skill
-        # Strategy: Freeze routers that were added during this skill's expansion
-        # This requires tracking which routers belong to which skill.
-        # For simplicity, we freeze ALL routers up to this skill's d_model range.
+        # Freeze ONLY this skill's parameters (weights + routers)
+        skill_params = skill['params']
         frozen_count = 0
         for name, param in self.named_parameters():
-            if 'router' in name or 'centroid' in name or 'log_beta' in name:
+            if name in skill_params:
                 param.requires_grad = False
                 frozen_count += 1
         
