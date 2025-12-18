@@ -796,16 +796,36 @@ def run_experiment():
     # --- NEW: Check for TinyStories Restorepoint to skip Phase 2 ---
     skip_tinystories_training = False
     if resume_from_phase < 3 and optimizer is None:
-        # Import shared utilities
-        from hf_utils import check_for_tinystories_restorepoint
-        restorepoint_path = check_for_tinystories_restorepoint(CONFIG["output_dir"], ensure_checkpoint_restored)
-        if restorepoint_path:
-            print(f"   🔄 Using TinyStories restorepoint: {restorepoint_path}")
-            model.load_state_dict(torch.load(os.path.join(restorepoint_path, "weights.pt")))
-            model = model.to(DEVICE)
-            skip_tinystories_training = True
-            resume_from_phase = 3  # Skip to Phase 4
-            print("   ✅ Pre-trained TinyStories loaded. Skipping Phase 2.")
+        # FIRST: Check for shared base model on HuggingFace
+        try:
+            from hf_base_models import download_base_if_exists
+            shared_base_path = download_base_if_exists(
+                dataset="tinystories",
+                d_model=CONFIG["tinystories_d_model"],
+                n_head=CONFIG["tinystories_n_head"],
+                n_layer=CONFIG["n_layer"]
+            )
+            if shared_base_path:
+                print(f"   🎯 Using shared TinyStories base from HuggingFace")
+                model.load_state_dict(torch.load(shared_base_path, map_location=DEVICE))
+                model = model.to(DEVICE)
+                skip_tinystories_training = True
+                resume_from_phase = 3
+                print("   ✅ Pre-trained shared base loaded. Skipping Phase 2.")
+        except Exception as e:
+            print(f"   ℹ️ Shared base check: {e}")
+        
+        # FALLBACK: Check local restorepoint
+        if not skip_tinystories_training:
+            from hf_utils import check_for_tinystories_restorepoint
+            restorepoint_path = check_for_tinystories_restorepoint(CONFIG["output_dir"], ensure_checkpoint_restored)
+            if restorepoint_path:
+                print(f"   🔄 Using TinyStories restorepoint: {restorepoint_path}")
+                model.load_state_dict(torch.load(os.path.join(restorepoint_path, "weights.pt")))
+                model = model.to(DEVICE)
+                skip_tinystories_training = True
+                resume_from_phase = 3
+                print("   ✅ Pre-trained TinyStories loaded. Skipping Phase 2.")
     
     if optimizer is None:
         model = model.to(DEVICE)
@@ -890,6 +910,20 @@ def run_experiment():
                        os.path.join(CONFIG["output_dir"], "milestone_tinystories"),
                        final_step, {"phase": "tinystories_complete"},
                        save_optimizer=False, is_rolling=False)
+        
+        # UPLOAD TO SHARED BASE REPO for other experiments to reuse
+        try:
+            from hf_base_models import upload_base_model
+            upload_base_model(
+                model=model,
+                dataset="tinystories",
+                d_model=CONFIG["tinystories_d_model"],
+                n_head=CONFIG["tinystories_n_head"],
+                n_layer=CONFIG["n_layer"],
+                step=final_step
+            )
+        except Exception as e:
+            print(f"   ⚠️ Could not upload to shared base repo: {e}")
         
         # Save replay buffer
         replay_buffer.save(os.path.join(CONFIG["output_dir"], "replay_buffer_tinystories"))
