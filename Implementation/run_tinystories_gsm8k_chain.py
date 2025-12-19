@@ -352,9 +352,15 @@ def ensure_checkpoint_restored(ckpt_path):
 import threading
 import queue
 
-_upload_queue = queue.Queue()
-_upload_thread = None
-_upload_thread_running = False
+
+# Dynamic experiment folder for uploads
+_experiment_folder = "tinystories_gsm8k"
+
+def set_experiment_folder(folder_name):
+    """Set the subfolder name for HF uploads (e.g. 'tinystories_psycho')."""
+    global _experiment_folder
+    _experiment_folder = folder_name
+    print(f"☁️ HF Upload Target Set: {_experiment_folder}")
 
 def _upload_worker():
     """Background worker that uploads checkpoints to HuggingFace Hub."""
@@ -388,18 +394,20 @@ def _upload_worker():
             if task is None:  # Shutdown signal
                 break
             
+            # Use dynamic folder name
+            experiment_folder = _experiment_folder
+            
             folder_path, step = task
             folder_name = os.path.basename(folder_path)
             
             # UNIFIED STRUCTURE: All paths under experiment subfolder
-            experiment_folder = "tinystories_gsm8k"
             
             if folder_name.startswith("milestone_"):
                 path_in_repo = f"{experiment_folder}/{folder_name}"
-                print(f"☁️ [Background] Uploading milestone: {folder_name} to HF Hub...")
+                print(f"☁️ [Background] Uploading milestone: {folder_name} to HF Hub ({experiment_folder})...")
             else:
                 path_in_repo = f"{experiment_folder}/resume_checkpoint"
-                print(f"☁️ [Background] Uploading {folder_path} to HF Hub...")
+                print(f"☁️ [Background] Uploading {folder_path} to HF Hub ({experiment_folder})...")
                 
                 # DELETE OLD CHECKPOINT ARCHIVES to prevent mixing old/new chunks
                 try:
