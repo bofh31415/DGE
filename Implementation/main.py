@@ -132,6 +132,8 @@ class DGELab:
             print("="*50)
             print("1. 📈 Count Up (Next Number)")
             print("2. 📉 Count Down (Previous Number)")
+            print("9. 🏛️ Create Foundation Models (Eng/Ger/Math)")
+            print("10. 🌍 Run Global Inference (All HF Models)")
             print("21. 🏋️ Neuro-Bodybuilding (Sparsity Tuning)")
             print("23. 🗿 Rosetta Stone Synergy (German Math)")
             print("e. 🧠  Expand Model")
@@ -182,6 +184,16 @@ class DGELab:
                                      replay_tasks=replay_list)
                 self.global_step = new_step
                 self.trained_skills.add(TaskType.COUNT_DOWN.name)
+            elif choice == '9':
+                # Create Foundation Models
+                print("\n🏛️ Launching Foundation Models Generator...")
+                import subprocess
+                subprocess.run(["python", "run_create_foundations.py"])
+            elif choice == '10':
+                # Global Inference
+                print("\n🌍 Launching Global Inference Scan...")
+                import subprocess
+                subprocess.run(["python", "run_global_inference.py"])
             elif choice == '21':
                 # Neuro-Bodybuilding Experiment
                 print("\n🏋️ Launching Neuro-Bodybuilding Experiment...")

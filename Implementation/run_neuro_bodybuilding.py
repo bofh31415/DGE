@@ -76,7 +76,9 @@ CONFIG = {
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Use unified HF repo manager
+    # Use unified HF repo manager
 from hf_repo_manager import HFRepoManager, wait_for_uploads
+from hf_utils import download_foundation_model # Import
 HF_MANAGER = HFRepoManager("neuro_bodybuilding")
 HF_REPO = "darealSven/dge"
 
@@ -180,6 +182,20 @@ def run_experiment():
         if os.path.exists(os.path.join(ckpt_path, "optimizer.pt")):
             optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "optimizer.pt")))
         print(f"   ✅ Resumed from step {start_step}")
+    else:
+        # Foundation Model Check (German)
+        foundation_dir = os.path.join(CONFIG["output_dir"], "foundation_base")
+        if download_foundation_model("german_v1", foundation_dir):
+             print(f"   🏛️ Using Foundation Model: german_v1")
+             try:
+                 model.load_state_dict(torch.load(os.path.join(foundation_dir, "weights.pt")))
+                 # We reset optimizer for the new experiment usually?
+                 # Yes, Neuro Bodybuilding starts fresh tuning.
+                 print("   ✅ Foundation weights loaded.")
+             except Exception as e:
+                 print(f"   ⚠️ Failed to load foundation weights: {e}")
+    
+    print(f"   Parameters: {sum(p.numel() for p in model.parameters()):,}")
     
     print(f"   Parameters: {sum(p.numel() for p in model.parameters()):,}")
     

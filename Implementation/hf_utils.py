@@ -14,6 +14,74 @@ HF_TINYSTORIES_REPOS = [
     "darealSven/dge-tinystories-german-psycho", # German Psycho experiment
 ]
 
+HF_FOUNDATION_REPO = "darealSven/dge"
+
+def download_foundation_model(foundation_name, target_dir):
+    """
+    Download a Foundation Model from darealSven/dge/foundations/{name}.
+    
+    Args:
+        foundation_name: e.g. 'english_v1', 'german_v1'
+        target_dir: Local path to save as a checkpoint (e.g. models/exp/milestone_foundation)
+        
+    Returns:
+        True if found and downloaded, False otherwise.
+    """
+    try:
+        from huggingface_hub import hf_hub_download, list_repo_files
+        
+        repo_prefix = f"foundations/{foundation_name}"
+        files = list_repo_files(HF_FOUNDATION_REPO)
+        
+        # Check if foundation exists
+        foundation_files = [f for f in files if f.startswith(repo_prefix)]
+        if not foundation_files:
+            return False
+            
+        print(f"   🏛️ Found Foundation Model: {foundation_name}")
+        os.makedirs(target_dir, exist_ok=True)
+        
+        # Download files
+        for f in foundation_files:
+            local_fname = os.path.basename(f) # e.g. weights.pt
+            hf_hub_download(
+                repo_id=HF_FOUNDATION_REPO,
+                filename=f,
+                local_dir=target_dir,
+                local_dir_use_symlinks=False
+            )
+            # Move/Rename if needed? (hf_hub_download maintains structure relative to local_dir if specified?)
+            # Wait, local_dir puts it in root if we don't specify strict structure. 
+            # Actually hf_hub_download(filename="foundations/x/weights.pt", local_dir=".") -> ./foundations/x/weights.pt
+            # But we want it in target_dir directly as just "weights.pt".
+            # We can read the downloaded file location and move it.
+            
+            # Better way:
+            local_path = hf_hub_download(HF_FOUNDATION_REPO, f, local_dir=target_dir) 
+            # This creates target_dir/foundations/name/weights.pt structure usually?
+            # Let's check docs logic simulation: if filename has slashes, it recreates them.
+            # We want flatten. 
+            # So let's move it.
+            
+            full_downloaded_path = os.path.join(target_dir, f)
+            desired_path = os.path.join(target_dir, os.path.basename(f))
+            if full_downloaded_path != desired_path and os.path.exists(full_downloaded_path):
+                 import shutil
+                 shutil.move(full_downloaded_path, desired_path)
+                 # Cleanup empty dirs
+                 try:
+                     os.rmdir(os.path.dirname(full_downloaded_path))
+                     os.rmdir(os.path.join(target_dir, "foundations"))
+                 except:
+                     pass
+
+        print(f"   ✅ Downloaded {foundation_name} to {target_dir}")
+        return True
+    except Exception as e:
+        print(f"   ⚠️ Foundation download failed: {e}")
+        return False
+
+
 
 def download_hf_restorepoint(repo_id, folder_name, local_path):
     """

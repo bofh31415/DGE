@@ -42,7 +42,7 @@ from run_tinystories_gsm8k_chain import (
     count_parameters, compute_perplexity,
     set_experiment_folder
 )
-from hf_utils import check_for_tinystories_restorepoint, generate_model_card
+from hf_utils import check_for_tinystories_restorepoint, generate_model_card, download_foundation_model
 
 # ============================================================================
 # CONFIGURATION
@@ -162,15 +162,23 @@ def run_experiment():
         print("   ✅ Restoration Complete.")
         
     else:
-        # If no resume, try to load TinyStories Base
-        restorepoint_path = check_for_tinystories_restorepoint(CONFIG["output_dir"], ensure_checkpoint_restored)
-        if restorepoint_path:
-            print(f"   🔄 Using TinyStories restored base from: {restorepoint_path}")
-            model.load_state_dict(torch.load(os.path.join(restorepoint_path, "weights.pt")))
+        # If no resume, try to load Foundation Model (English V1)
+        foundation_dir = os.path.join(CONFIG["output_dir"], "foundation_base")
+        if download_foundation_model("english_v1", foundation_dir):
+            print(f"   🏛️ Using Foundation Model: english_v1")
+            model.load_state_dict(torch.load(os.path.join(foundation_dir, "weights.pt")))
             model = model.to(DEVICE)
+            print("   ✅ Foundation weights loaded.")
         else:
-            print("   ⚠️ No base model found! Starting from scratch (Suboptimal for this experiment).")
-            model = model.to(DEVICE)
+            # Fallback to legacy check
+            restorepoint_path = check_for_tinystories_restorepoint(CONFIG["output_dir"], ensure_checkpoint_restored)
+            if restorepoint_path:
+                print(f"   🔄 Using TinyStories restored base from: {restorepoint_path}")
+                model.load_state_dict(torch.load(os.path.join(restorepoint_path, "weights.pt")))
+                model = model.to(DEVICE)
+            else:
+                print("   ⚠️ No base model found! Starting from scratch (Suboptimal for this experiment).")
+                model = model.to(DEVICE)
 
     # ========================================================================
     # PHASE 2: Train GSM8K (English Math Logic)

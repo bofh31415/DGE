@@ -36,6 +36,7 @@ from dge_logger import DGELogger
 from replay_buffer import ReplayBuffer
 from data import load_tinystories, load_gsm8k
 from version import __version__
+from hf_utils import download_foundation_model
 
 # Windows console-safe print (handles Unicode emojis)
 def safe_print(msg):
@@ -797,6 +798,38 @@ def run_experiment():
             print(f"   ✅ Resumed from GSM8K checkpoint at step {final_step}")
     elif resume_from_phase >= 2:
         # Load from TinyStories checkpoint - Unified Resume Checkpoint
+        ts_ckpt = os.path.join(CONFIG["output_dir"], "resume_checkpoint")
+        if ensure_checkpoint_restored(ts_ckpt):
+             print(f"   Loading TinyStories checkpoint from {ts_ckpt}...")
+             model.load_state_dict(torch.load(os.path.join(ts_ckpt, "weights.pt")))
+             model = model.to(DEVICE)
+             # Restore optimizer if needed (Phase 2 uses TS_LR)
+             optimizer = optim.AdamW(model.parameters(), lr=CONFIG["tinystories_lr"], weight_decay=0.01)
+             if os.path.exists(os.path.join(ts_ckpt, "optimizer.pt")):
+                 optimizer.load_state_dict(torch.load(os.path.join(ts_ckpt, "optimizer.pt")))
+             print(f"   ✅ Resumed from TinyStories checkpoint at step {final_step}")
+    else:
+        # Foundation Model Check (English)
+        foundation_dir = os.path.join(CONFIG["output_dir"], "foundation_base")
+        if download_foundation_model("english_v1", foundation_dir):
+            print(f"   🏛️ FOUNDATION MODEL FOUND: english_v1")
+            try:
+                model.load_state_dict(torch.load(os.path.join(foundation_dir, "weights.pt")))
+                model = model.to(DEVICE)
+                print("   ✅ Loaded Foundation Model. Skipping Phase 1 Training.")
+                resume_from_phase = 3 # Skip Train (Phase 2) -> Goto Eval (Phase 3)
+                final_step = 0
+            except Exception as e:
+                print(f"   ⚠️ Failed to load foundation weights: {e}")
+                
+        # Fallback to local checkpoint check if foundation failed or not found (and we are Phase 1)
+        # But Phase 1 is creation. If we are here, we are phase < 2 and no foundation.
+        # Check if we have a partial checkpoint (Phase 1/2) that wasn't caught by >=2 check
+        # (Usually resume_from_phase 2 means we finished Phase 1 training? 
+        # Actually Phase 2 is TRAINING TinyStories. Phase 1 is CREATION.
+        # So resume_from_phase usually 0 or 2 (start of training).
+        # If we have a checkpoint, we load it.)
+        
         ts_ckpt = os.path.join(CONFIG["output_dir"], "resume_checkpoint")
         if ensure_checkpoint_restored(ts_ckpt):
             print(f"   Loading model from {ts_ckpt}...")

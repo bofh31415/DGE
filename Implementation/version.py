@@ -1,1 +1,1 @@
-__version__ = "V 0.9.7"  # Interleaved Training + BigramRouter = 100%/100%
+__version__ = "V 0.10.0"  # Foundations + Global Inference + German/Math Synergy
