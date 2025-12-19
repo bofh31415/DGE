@@ -1453,6 +1453,10 @@ if __name__ == "__main__":
     finally:
         # Wait for pending HF uploads
         shutdown_upload_worker()
+        
+        # Cleanup intermediate checkpoints from HF (keep only final)
+        HF_MANAGER.cleanup_intermediate_checkpoints("milestone_gsm8k")
+        
         print("\n🏁 Experiment Script Completed.")
         
         # STOP the pod automatically to save money (but keep data)

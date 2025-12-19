@@ -199,6 +199,87 @@ class HFRepoManager:
         except:
             pass
     
+    def cleanup_intermediate_checkpoints(self, final_milestone_name: str = "milestone_final"):
+        """
+        Delete intermediate checkpoints from HF after experiment completes.
+        
+        Args:
+            final_milestone_name: Name of the final milestone to KEEP (e.g., "milestone_gsm8k").
+                                  Everything else under the experiment folder gets deleted.
+        
+        Keeps:
+            - {experiment_name}/{final_milestone_name}/*
+            - {experiment_name}/logs/*
+            - {experiment_name}/experiment_results.json
+            - {experiment_name}/*.jsonl (log files)
+        
+        Deletes:
+            - {experiment_name}/resume_checkpoint/*
+            - {experiment_name}/milestone_* (except final)
+        """
+        if not self.api:
+            print("⚠️ No HF API, cannot cleanup.")
+            return
+            
+        print(f"\n🧹 Cleaning up intermediate checkpoints from HF...")
+        print(f"   Keeping: {self.experiment_name}/{final_milestone_name}")
+        
+        try:
+            from huggingface_hub import list_repo_files
+            
+            files = list_repo_files(self.repo_id, token=self.hf_token)
+            exp_prefix = f"{self.experiment_name}/"
+            
+            files_to_delete = []
+            
+            for f in files:
+                if not f.startswith(exp_prefix):
+                    continue
+                    
+                relative_path = f[len(exp_prefix):]
+                
+                # Keep final milestone
+                if relative_path.startswith(final_milestone_name):
+                    continue
+                    
+                # Keep logs
+                if relative_path.startswith("logs/"):
+                    continue
+                    
+                # Keep experiment results
+                if relative_path == "experiment_results.json":
+                    continue
+                    
+                # Keep root-level log files
+                if relative_path.endswith(".jsonl") or relative_path.endswith(".json"):
+                    continue
+                    
+                # Delete resume_checkpoint and other milestones
+                if relative_path.startswith("resume_checkpoint/") or relative_path.startswith("milestone_"):
+                    files_to_delete.append(f)
+                    
+            if not files_to_delete:
+                print("   ✅ Nothing to clean up.")
+                return
+                
+            print(f"   🗑️ Deleting {len(files_to_delete)} files...")
+            
+            for f in files_to_delete:
+                try:
+                    self.api.delete_file(
+                        path_in_repo=f,
+                        repo_id=self.repo_id,
+                        token=self.hf_token,
+                        commit_message=f"Cleanup: Remove intermediate checkpoint file"
+                    )
+                except Exception as e:
+                    print(f"   ⚠️ Could not delete {f}: {e}")
+                    
+            print(f"   ✅ Cleanup complete.")
+            
+        except Exception as e:
+            print(f"   ❌ Cleanup failed: {e}")
+    
     def _ensure_worker_running(self):
         """Start background upload worker if not running."""
         global _upload_worker_running, _upload_thread

@@ -299,6 +299,10 @@ def run_experiment():
         json.dump(results, f, indent=2)
         
     print("\n✅ Rosetta Stone Experiment Complete!")
+    
+    # Cleanup intermediate checkpoints from HF (keep only final)
+    HF_MANAGER.cleanup_intermediate_checkpoints("milestone_rosetta_final")
+    
     shutdown_upload_worker()
 
 if __name__ == "__main__":
