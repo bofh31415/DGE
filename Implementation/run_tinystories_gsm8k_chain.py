@@ -353,6 +353,10 @@ import threading
 import queue
 
 
+_upload_queue = queue.Queue()
+_upload_thread = None
+_upload_thread_running = False
+
 # Dynamic experiment folder for uploads
 _experiment_folder = "tinystories_gsm8k"
 
