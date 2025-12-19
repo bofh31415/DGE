@@ -71,8 +71,8 @@ def detect_gpu_config():
         ts_batch, gsm8k_batch = 64, 32
         print(f"✅ High VRAM ({vram_gb:.0f}GB): Using large batches (64/32)")
     elif vram_gb >= 24:  # RTX 4090, A4000, etc.
-        ts_batch, gsm8k_batch = 32, 8
-        print(f"✅ Medium VRAM ({vram_gb:.0f}GB): Using medium batches (32/8)")
+        ts_batch, gsm8k_batch = 64, 16
+        print(f"✅ Medium-High VRAM ({vram_gb:.0f}GB): Using optimized batches (64/16)")
     elif vram_gb >= 16:  # RTX 4080, T4, etc.
         ts_batch, gsm8k_batch = 16, 4
         print(f"⚠️ Limited VRAM ({vram_gb:.0f}GB): Using small batches (16/4)")
@@ -545,22 +545,21 @@ def save_checkpoint(model, optimizer, path, step, config, save_optimizer=True, i
         safe_print(f"[SAVE] Checkpoint saved: {path} (Optim: {save_optimizer}, Rolling: {is_rolling})")
         
         # === CHUNK & COMPRESS (Moon Landing V2) ===
-        # Zip and split large files to avoid HF/Git limits
-        safe_print(f"[ZIP] Compressing and chunking checkpoint...")
-        
-        # 1. Create Archive (excluding json files initially? No, make_archive zips everything)
-        # We want to zip `weights.pt` and `optimizer.pt`
-        # But `config.json` and `resume_state.json` should ideally remain visible?
-        # create_chunked_archive zips the whole folder.
-        
-        chunks = create_chunked_archive(path, os.path.join(path, "checkpoint_archive"), chunk_size_mb=400)
-        print(f"   -> Created {len(chunks)} chunks.")
-        
-        # 2. Delete original large files to save space
-        if os.path.exists(weights_path):
-            os.remove(weights_path)
-        if save_optimizer and os.path.exists(optimizer_path):
-            os.remove(optimizer_path)
+        # Only zip if we are uploading to HF or explicitly requested (to save local disk/time)
+        if upload_to_hf:
+            safe_print(f"[ZIP] Compressing and chunking checkpoint for upload...")
+            
+            # 1. Create Archive
+            chunks = create_chunked_archive(path, os.path.join(path, "checkpoint_archive"), chunk_size_mb=400)
+            print(f"   -> Created {len(chunks)} chunks.")
+            
+            # 2. Delete original large files to save space
+            if os.path.exists(weights_path):
+                os.remove(weights_path)
+            if save_optimizer and os.path.exists(optimizer_path):
+                os.remove(optimizer_path)
+        else:
+            safe_print(f"[SAVE] Skipping zip compression (local only).")
         
         # Note: config.json and resume_state.json remain in the folder (and inside zip too).
         # This is fine. (Data redundancy is negligible for small files).
@@ -714,8 +713,8 @@ def run_experiment():
                         json.dump(resume_state_data, f)
                     print(f"   📝 Created resume_state: phase={resume_phase}, step={ckpt_step}")
                 
-                # Download chunked archives if present
-                archive_files = [f for f in files if "checkpoint_archive" in f]
+                # Download chunked archives if present (ONLY from resume_checkpoint)
+                archive_files = [f for f in files if "checkpoint_archive" in f and f.startswith("tinystories_gsm8k/resume_checkpoint/")]
                 if archive_files:
                     print(f"   📦 Downloading {len(archive_files)} archive chunks...")
                     for f in archive_files:
