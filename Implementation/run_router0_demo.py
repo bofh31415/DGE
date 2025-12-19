@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Router0 Always IDK Demo - V 0.9.6
-=================================
-Demonstrates the clean skill-based expansion architecture.
+Router0 Demo - V 0.9.7
+================================
+Demonstrates Skill-Based Expansion with Router0 Architecture.
 
 Flow:
-1. Create base model (router0 = IDK only)
-2. expand_for_skill("Count Up") → train → freeze_skill
-3. expand_for_skill("Count Down") → train → freeze_skill  
-4. Test retention (Count Up should still work!)
-5. Test OOD (random patterns → IDK)
+1. Create base model (router0 = IDK)
+2. Expand for "Count Up" (Skill A) -> Train
+3. Expand for "Count Down" (Skill B) -> Train Interleaved (A+B)
+4. Verify 100% Retention + 100% Plasticity
 """
 
 import torch
@@ -35,12 +34,6 @@ def generate_count_down(batch_size, seq_len=4):
     starts = torch.randint(seq_len, 10, (batch_size,))
     inputs = torch.stack([starts - i for i in range(seq_len - 1)], dim=1)
     targets = (starts - seq_len + 1).unsqueeze(1)
-    return inputs.to(DEVICE), targets.to(DEVICE)
-
-def generate_random(batch_size, seq_len=4):
-    """Random OOD patterns"""
-    inputs = torch.randint(1, 10, (batch_size, seq_len - 1))
-    targets = torch.randint(1, 10, (batch_size, 1))
     return inputs.to(DEVICE), targets.to(DEVICE)
 
 # =============================================================================
@@ -99,24 +92,26 @@ def evaluate(model, generate_fn, name):
 
 def run_demo():
     print("=" * 70)
-    print("🧪 Router0 Always IDK Demo - V 0.9.6")
+    print("🧪 Router0 Always IDK Demo - V 0.9.7")
+    print("   Goal: 100% Retention + 100% Plasticity via Interleaved Training")
     print("=" * 70)
     
-    # 1. Create base model (router0 = IDK)
+    # 1. Create base model (router0 = IDK only)
     print("\n📦 Step 1: Creating base model (router0 = IDK only)")
     model = DGESimpleTransformer(
         vocab_size=20,
         d_model=32,
-        n_layer=1,
+        n_layer=1, # Keep small for clarity
         n_head=2,
         initial_gating=True,
-        router_type='rbf'
+        router_type='bigram' # V26: Bigram for context
     ).to(DEVICE)
-    print(f"   Base model: d_model={model.d_model}, params={sum(p.numel() for p in model.parameters()):,}")
+    
+    print(f"   Base Param Count: {sum(p.numel() for p in model.parameters()):,}")
     
     # 2. Expand for Skill A (Count Up)
     print("\n🎯 Step 2: Expanding for 'Count Up' skill")
-    skill_a = model.expand_for_skill("Count Up", expansion_delta=16, router_type='bigram')  # V26: Bigram for context
+    skill_a = model.expand_for_skill("Count Up", expansion_delta=16, router_type='bigram')
     print(f"   After expansion: d_model={model.d_model}, params={sum(p.numel() for p in model.parameters()):,}")
     
     # 3. Train Count Up
@@ -124,16 +119,15 @@ def run_demo():
     acc_a = train_skill(model, generate_count_up, num_steps=300)
     print(f"   ✅ Count Up trained: {acc_a:.2%} accuracy")
     
-    # 4. DON'T Freeze Skill A - let routers handle separation
-    print("\n🔓 Step 4: NOT freezing 'Count Up' (routing handles separation)")
-    # model.freeze_skill(skill_a)  # DISABLED: Let routers learn routing
+    # 4. Freeze Skill A? NO. Interleaved training handles it.
+    print("\n🔓 Step 4: Skipping freeze (Interleaved Training will maintain retention)")
     
     # 5. Expand for Skill B (Count Down)
     print("\n🎯 Step 5: Expanding for 'Count Down' skill")
-    skill_b = model.expand_for_skill("Count Down", expansion_delta=16, router_type='bigram')  # V26: Bigram for context
+    skill_b = model.expand_for_skill("Count Down", expansion_delta=16, router_type='bigram')
     print(f"   After expansion: d_model={model.d_model}, params={sum(p.numel() for p in model.parameters()):,}")
     
-    # 6. INTERLEAVED TRAINING: Train Count Down while replaying Count Up
+    # 6. Interleaved Training
     print("\n🏋️ Step 6: Interleaved Training (Count Down + Count Up Replay)")
     optimizer = optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=0.001)
     criterion = nn.CrossEntropyLoss()
@@ -168,28 +162,20 @@ def run_demo():
     
     print(f"   ✅ Interleaved Training Complete")
     
-    # 7. Skip separate replay - interleaved training handles it
-    print("\n🔓 Step 7: Skipping separate replay (interleaved handles it)")
-    
-    # 8. CRITICAL TEST: Does Count Up still work?
+    # 7. CRITICAL TEST
     print("\n" + "=" * 70)
-    print("📊 RETENTION TEST: Does Count Up still work after learning Count Down?")
+    print("📊 FINAL RESULTS")
     print("=" * 70)
     retention = evaluate(model, generate_count_up, "Count Up Retention")
     plasticity = evaluate(model, generate_count_down, "Count Down Accuracy")
     
-    # 9. Summary
-    print("\n" + "=" * 70)
-    print("📊 SUMMARY")
-    print("=" * 70)
-    print(f"   Count Up Retention: {retention:.2%}")
-    print(f"   Count Down Accuracy: {plasticity:.2%}")
-    print(f"\n📋 Skill Registry:")
-    for sid, info in model.get_skill_info().items():
-        status = "❄️ FROZEN" if info['frozen'] else "🔓 ACTIVE"
+    print("\n📋 Skill Registry:")
+    skills = model.get_skill_info()
+    for sid, info in skills.items():
+        status = "FROZEN" if info['frozen'] else "ACTIVE"
         print(f"   [{sid}] {info['name']}: {info['old_d_model']}→{info['new_d_model']} {status}")
-    
-    if retention > 0.8 and plasticity > 0.8:
+        
+    if retention > 0.99 and plasticity > 0.99:
         print("\n✅ SUCCESS! Both skills retained!")
     else:
         print("\n⚠️ Some retention/plasticity issues - router tuning needed")

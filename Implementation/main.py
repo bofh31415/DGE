@@ -133,6 +133,7 @@ class DGELab:
             print("1. 📈 Count Up (Next Number)")
             print("2. 📉 Count Down (Previous Number)")
             print("21. 🏋️ Neuro-Bodybuilding (Sparsity Tuning)")
+            print("23. 🗿 Rosetta Stone Synergy (German Math)")
             print("e. 🧠  Expand Model")
             print("f. 📊  Full Skill Benchmark")
             print("b. 🔙 Back")
@@ -186,6 +187,11 @@ class DGELab:
                 print("\n🏋️ Launching Neuro-Bodybuilding Experiment...")
                 import subprocess
                 subprocess.run(["python", "run_neuro_bodybuilding.py"])
+            elif choice == '23':
+                # Rosetta Stone Experiment
+                print("\n🗿 Launching Rosetta Stone Experiment...")
+                import subprocess
+                subprocess.run(["python", "run_rosetta_stone_experiment.py"])
             elif choice == 'e':
                 self.expand_menu()
             elif choice == 'f':

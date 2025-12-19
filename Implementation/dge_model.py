@@ -245,7 +245,7 @@ class DGESimpleTransformer(nn.Module):
         
         # Record pre-expansion state - capture param names BEFORE expansion
         old_d_model = self.d_model
-        pre_expansion_params = set(name for name, _ in self.named_parameters())
+        pre_expansion_params = set(id(p) for p in self.parameters())
         
         # Expand model
         new_d_model = self.d_model + expansion_delta
@@ -259,7 +259,7 @@ class DGESimpleTransformer(nn.Module):
         )
         
         # Capture NEW params created during expansion
-        post_expansion_params = set(name for name, _ in self.named_parameters())
+        post_expansion_params = set(id(p) for p in self.parameters())
         new_params = post_expansion_params - pre_expansion_params
         
         # Register skill with its specific params
@@ -269,7 +269,7 @@ class DGESimpleTransformer(nn.Module):
             'new_d_model': new_d_model,
             'router_type': router_type,
             'frozen': False,
-            'params': new_params  # Track which params belong to this skill
+            'params': new_params  # Track IDs of params belonging to this skill
         }
         
         print(f"   Skill '{skill_name}' registered with ID {skill_id} ({len(new_params)} new params)")
@@ -300,7 +300,7 @@ class DGESimpleTransformer(nn.Module):
         skill_params = skill['params']
         frozen_count = 0
         for name, param in self.named_parameters():
-            if name in skill_params:
+            if id(param) in skill_params:
                 param.requires_grad = False
                 frozen_count += 1
         
@@ -312,6 +312,108 @@ class DGESimpleTransformer(nn.Module):
         if not hasattr(self, '_skill_registry'):
             return {}
         return self._skill_registry.copy()
+
+    def imprint_skill(self, skill_id: int, data_loader, num_batches: int = 1, beta_init: float = None):
+        """
+        Initialize skill's RBF routers by sampling from data.
+        
+        This enables history-agnostic expansion:
+        1. Run forward pass to get hidden states at each layer
+        2. Sample these states to set RBF centroids for the new skill
+        3. This "imprints" the skill into a specific region of the latent space
+        
+        Args:
+            skill_id: ID of skill to imprint
+            data_loader: DataLoader or generator yielding (inputs, targets)
+            num_batches: How many batches to use for sampling
+            beta_init: Optional override for RBF beta parameter
+        """
+        if skill_id not in self._skill_registry:
+            raise ValueError(f"Skill ID {skill_id} not found.")
+        
+        skill = self._skill_registry[skill_id]
+        if skill['router_type'] != 'rbf':
+            print(f"⚠️ Skill '{skill['name']}' uses {skill['router_type']}, not RBF. Skipping imprint.")
+            return
+
+        print(f"\n🧬 Imprinting Skill '{skill['name']}' (ID: {skill_id})...")
+        skill_params = skill['params']
+        
+        # 1. Identify RBF routers belonging to this skill and register hooks
+        hook_handles = []
+        imprint_targets = []
+        
+        def get_hook(module):
+            def hook(mod, inputs, output):
+                # inputs[0] is [Batch, Seq, Dim]
+                # Only imprint if mask is active
+                if getattr(mod, 'imprint_mask', False):
+                    # print(f"   Debug: Imprinting {mod} with shape {inputs[0].shape}")
+                    mod.imprint_from_batch(inputs[0])
+                    mod.imprint_mask = False # Only imprint once per hook activation
+            return hook
+
+        count = 0
+        for name, module in self.named_modules():
+            # Check if this module's parameters are in the skill's parameter set
+            # We look for 'centroids' param to identify the RBF router
+            is_skill_router = False
+            for p_name, p in module.named_parameters():
+                if id(p) in skill_params:
+                    is_skill_router = True
+                    break
+            
+            if is_skill_router and hasattr(module, 'imprint_from_batch'):
+                module.imprint_mask = True
+                handle = module.register_forward_hook(get_hook(module))
+                hook_handles.append(handle)
+                imprint_targets.append(name)
+                count += 1
+                
+        print(f"   Found {count} routers to imprint.")
+        
+        # 2. Run Forward Pass to trigger hooks
+        self.eval() # Ensure deterministic mode
+        with torch.no_grad():
+            batch_count = 0
+            # Handle both list of batches and generator
+            iterator = iter(data_loader) if not isinstance(data_loader, list) else data_loader
+            
+            try:
+                for _ in range(num_batches):
+                    batch = next(iterator)
+                    # Handle (x, y) tuple or just x
+                    if isinstance(batch, (tuple, list)):
+                        x = batch[0]
+                    else:
+                        x = batch
+                    
+                    # Move to device if needed
+                    device = next(self.parameters()).device
+                    if isinstance(x, torch.Tensor):
+                        x = x.to(device)
+                    
+                    # Forward pass triggers hooks
+                    self(x)
+                    batch_count += 1
+            except StopIteration:
+                pass
+                
+        # 3. Cleanup
+        for h in hook_handles:
+            h.remove()
+        
+        # 4. Optional: Reset beta if requested
+        if beta_init is not None:
+            # Update log_beta for all imprinted routers
+            for name, module in self.named_modules():
+                if name in imprint_targets and hasattr(module, 'log_beta'):
+                    new_val = torch.ones_like(module.log_beta) * torch.log(torch.tensor(beta_init))
+                    module.log_beta.data.copy_(new_val)
+            print(f"   ✅ Reset beta to {beta_init} for {len(imprint_targets)} routers.")
+            
+        print(f"   ✅ Imprinted {count} routers from {batch_count} batches.")
+        self.train()
 
 
     def get_model_confidence(self) -> float:

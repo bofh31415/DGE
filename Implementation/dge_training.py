@@ -66,7 +66,16 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
     # Device handling - move model to GPU if available
     device = DEVICE
     model = model.to(device)
+    
+    # MULTI-GPU SUPPORT
+    if torch.cuda.device_count() > 1:
+        print(f"🚀 Using {torch.cuda.device_count()} GPUs for training!")
+        model = torch.nn.DataParallel(model)
+        
     print(f"🖥️ Training on: {device}" + (f" ({torch.cuda.get_device_name(0)})" if device.type == 'cuda' else ""))
+    
+    # Reference to base model attributes (unwrap DP if needed)
+    raw_model = model.module if isinstance(model, torch.nn.DataParallel) else model
     
     if optimizer is None:
         optimizer = optim.AdamW(model.parameters(), lr=1e-3)
@@ -120,6 +129,9 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
             
             optimizer.zero_grad()
             logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
+            
+            # DataParallel returns vector of losses (one per GPU)
+            loss = loss.mean()
             loss.backward()
             
             # ASYMMETRIC REPLAY: Zero out gradients for non-router parameters
@@ -142,6 +154,9 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
             
             optimizer.zero_grad()
             logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
+            
+            # DataParallel returns vector of losses
+            loss = loss.mean()
             loss.backward()
             optimizer.step()
         
@@ -262,6 +277,12 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
     # Device handling - move model to GPU if available
     device = DEVICE
     model = model.to(device)
+    
+    # MULTI-GPU SUPPORT
+    if torch.cuda.device_count() > 1:
+        print(f"🚀 Using {torch.cuda.device_count()} GPUs for training!")
+        model = torch.nn.DataParallel(model)
+        
     print(f"🖥️ Training on: {device}" + (f" ({torch.cuda.get_device_name(0)})" if device.type == 'cuda' else ""))
     
     if optimizer is None:
@@ -280,6 +301,10 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
     
     # Auto-estimate replay ratio if buffer provided but ratio not specified
     if replay_buffer and not replay_buffer.is_empty() and replay_ratio is None:
+        # Unwrap for integrity checks if needed, but estimate doesn't need to run forward
+        # Wait, estimate uses model forward pass? 
+        # estimate_replay_ratio calls compute_perplexity -> model(x,y). 
+        # If model is already wrapped, it's fine.
         replay_ratio = estimate_replay_ratio(replay_buffer, model)
         print(f"📊 Auto-estimated replay ratio: {replay_ratio:.2%}")
     
@@ -309,6 +334,9 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
                 
                 optimizer.zero_grad()
                 logits, loss = model(x_r, y_r, sparsity_lambda=sparsity_lambda)
+                
+                # Multi-GPU: Average loss
+                loss = loss.mean()
                 loss.backward()
                 
                 # Zero out non-router gradients
@@ -321,6 +349,9 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
                 # --- Main Task Training ---
                 optimizer.zero_grad()
                 logits, loss = model(x, y, sparsity_lambda=sparsity_lambda)
+                
+                # Multi-GPU: Average loss
+                loss = loss.mean()
                 loss.backward()
                 optimizer.step()
                 

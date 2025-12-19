@@ -524,6 +524,69 @@ def load_gsm8k(split='train', max_samples=None, seq_len=256, batch_size=32,
     return dataloader
 
 
+def load_mgsm(split='test', lang='de', max_samples=None, seq_len=256, batch_size=32, 
+              tokenizer_name='gpt2', vocab_size=None, shuffle=False):
+    """
+    Load MGSM (Multilingual GSM8K) dataset from HuggingFace.
+    Used for synergy verification (German Math).
+    
+    Args:
+        split: 'train' (8 samples) or 'test' (250 samples).
+        lang: Language code (default 'de' for German).
+        max_samples: Maximum number of samples to load.
+        seq_len: Sequence length.
+        batch_size: Batch size.
+        tokenizer_name: HuggingFace tokenizer.
+        vocab_size: Clamp token IDs.
+        shuffle: Whether to shuffle (usually False for evaluation).
+        
+    Returns:
+        PyTorch DataLoader.
+    """
+    if not HF_AVAILABLE:
+        raise ImportError("HuggingFace datasets required. Run: pip install datasets")
+        
+    print(f"🌍 Loading MGSM ({lang}/{split})...")
+    # juletxara/mgsm uses configuration names for languages (e.g. 'de')
+    dataset = load_dataset("juletxara/mgsm", lang, split=split)
+    
+    if max_samples:
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+        
+    # Load tokenizer
+    if TOKENIZER_AVAILABLE and tokenizer_name:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    else:
+        tokenizer = None
+        
+    # MGSM format: 
+    # {
+    #   "question": "...",
+    #   "answer": "...", (Reasoning step by step)
+    #   "answer_number": 42
+    # }
+    texts = []
+    for item in dataset:
+        # We want the model to generate the reasoning and the answer
+        combined = f"Frage: {item['question']}\nAntwort: {item['answer']}"
+        texts.append(combined)
+        
+    torch_dataset = TextDataset(texts, tokenizer, seq_len, vocab_size)
+    
+    dataloader = DataLoader(
+        torch_dataset,
+        batch_size=batch_size,
+        shuffle=shuffle, # Usually evaluated sequentially
+        num_workers=0,
+        pin_memory=True
+    )
+    
+    print(f"✅ Loaded {len(torch_dataset)} samples from MGSM-{lang}")
+    return dataloader
+
+
 
 
 def load_text_file(filepath, seq_len=128, batch_size=32, vocab_size=1000, shuffle=True):
@@ -575,6 +638,60 @@ def load_text_file(filepath, seq_len=128, batch_size=32, vocab_size=1000, shuffl
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0)
     
     print(f"✅ Created {len(dataset)} samples from {len(text)} characters")
+    return dataloader
+
+
+
+def load_german_tinystories(split='train', max_samples=None, seq_len=256, batch_size=32, 
+                            tokenizer_name='gpt2', vocab_size=None, shuffle=True):
+    """
+    Load German TinyStories (SkySyrup/tinystories_german).
+    Used for teaching German language skills in Rosetta Stone experiment.
+    
+    Args:
+        split: 'train' or 'validation'.
+        max_samples: Maximum samples to load.
+        seq_len: Sequence length.
+        batch_size: Batch size.
+        tokenizer: Tokenizer.
+        vocab_size: Vocab clamp.
+        shuffle: Whether to shuffle.
+        
+    Returns:
+        PyTorch DataLoader.
+    """
+    if not HF_AVAILABLE:
+        raise ImportError("HuggingFace datasets required. Run: pip install datasets")
+        
+    print(f"🇩🇪 Loading German TinyStories ({split})...")
+    # SkySyrup/tinystories_german
+    dataset = load_dataset("SkySyrup/tinystories_german", split=split)
+    
+    if max_samples:
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+        
+    # Load tokenizer
+    if TOKENIZER_AVAILABLE and tokenizer_name:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    else:
+        tokenizer = None
+        
+    # Extract text from 'text' column
+    texts = [item['text'] for item in dataset]
+        
+    torch_dataset = TextDataset(texts, tokenizer, seq_len, vocab_size)
+    
+    dataloader = DataLoader(
+        torch_dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=0,
+        pin_memory=True
+    )
+    
+    print(f"✅ Loaded {len(torch_dataset)} samples from German TinyStories")
     return dataloader
 
 
