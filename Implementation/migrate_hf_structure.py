@@ -1,21 +1,14 @@
 """
-HuggingFace Repository Migration Script (V 0.1.0)
+HuggingFace Repository Migration Script (V 0.2.0)
 ==================================================
-One-time migration to move existing HF repos to unified structure.
-
-Before:
-    darealSven/dge-tinystories-gsm8k/
-    darealSven/dge-tinystories-german-psycho/
-    
-After:
-    darealSven/dge-models/
-    ├── tinystories_gsm8k/
-    │   ├── resume_checkpoint/
-    │   ├── milestone_*/
-    │   └── logs/
-    ├── german_psycho/
-    └── shared_bases/
-        └── tinystories_384_6head_12layer/
+Migration logic:
+1. Scan known old repos (or dge-models if it became messy)
+2. Move content to unified 'darealSven/dge' repo
+3. Standardize structure:
+    darealSven/dge/
+    ├── shared_bases/
+    ├── {experiment_name}/
+    └── _legacy_archive/
 
 Usage:
     python migrate_hf_structure.py
@@ -29,15 +22,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Old repos to migrate
+# Old repos to migrate FROM
 OLD_REPOS = [
     ("darealSven/dge-tinystories-gsm8k", "tinystories_gsm8k"),
     ("darealSven/dge-tinystories-german-psycho", "german_psycho"),
-    ("darealSven/dge-base-models", "shared_bases"),
+    # ("darealSven/dge-base-models", "shared_bases"), # Keeping this if it exists
 ]
 
 # New unified repo
-NEW_REPO = "darealSven/dge-models"
+NEW_REPO = "darealSven/dge"
 
 
 def migrate():

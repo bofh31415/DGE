@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Optional, Callable, Tuple
 
 # Base repository for shared models
-BASE_REPO = "darealSven/dge-base-models"
+BASE_REPO = "darealSven/dge"
 
 def get_model_key(dataset: str, d_model: int, n_head: int, n_layer: int) -> str:
     """
@@ -57,6 +57,7 @@ def download_base_if_exists(
         Path to weights.pt if found, None otherwise
     """
     model_key = get_model_key(dataset, d_model, n_head, n_layer)
+    hf_path = f"shared_bases/{model_key}"
     
     try:
         from huggingface_hub import hf_hub_download, list_repo_files
@@ -70,8 +71,8 @@ def download_base_if_exists(
             print(f"   ℹ️ Base repo {BASE_REPO} not accessible")
             return None
         
-        weights_path = f"{model_key}/weights.pt"
-        if weights_path not in files:
+        weights_file = f"{hf_path}/weights.pt"
+        if weights_file not in files:
             print(f"   ℹ️ No pre-trained base found for {model_key}")
             return None
         
@@ -81,15 +82,15 @@ def download_base_if_exists(
         
         local_weights = hf_hub_download(
             BASE_REPO, 
-            weights_path, 
+            weights_file, 
             token=hf_token,
             local_dir=local_cache
         )
         
         # Also download config if exists
-        config_path = f"{model_key}/config.json"
-        if config_path in files:
-            hf_hub_download(BASE_REPO, config_path, token=hf_token, local_dir=local_cache)
+        config_file = f"{hf_path}/config.json"
+        if config_file in files:
+            hf_hub_download(BASE_REPO, config_file, token=hf_token, local_dir=local_cache)
         
         print(f"   ✅ Downloaded pre-trained base from HuggingFace")
         return local_weights
@@ -125,6 +126,7 @@ def upload_base_model(
         True if upload succeeded
     """
     model_key = get_model_key(dataset, d_model, n_head, n_layer)
+    hf_path = f"shared_bases/{model_key}"
     
     try:
         from huggingface_hub import HfApi, create_repo
@@ -143,11 +145,12 @@ def upload_base_model(
             pass  # Repo might already exist
         
         # Prepare upload
-        upload_path = os.path.join(temp_dir, model_key)
-        os.makedirs(upload_path, exist_ok=True)
+        # We need a CLEAN temp folder for this upload
+        upload_stage = os.path.join(temp_dir, model_key)
+        os.makedirs(upload_stage, exist_ok=True)
         
         # Save weights
-        torch.save(model.state_dict(), os.path.join(upload_path, "weights.pt"))
+        torch.save(model.state_dict(), os.path.join(upload_stage, "weights.pt"))
         
         # Save config
         config = {
@@ -158,20 +161,20 @@ def upload_base_model(
             "step": step,
             "uploaded_at": datetime.now().isoformat(),
         }
-        with open(os.path.join(upload_path, "config.json"), "w") as f:
+        with open(os.path.join(upload_stage, "config.json"), "w") as f:
             json.dump(config, f, indent=2)
         
         # Upload
         print(f"   ☁️ Uploading base model: {model_key}")
         api.upload_folder(
-            folder_path=upload_path,
-            path_in_repo=model_key,
+            folder_path=upload_stage,
+            path_in_repo=hf_path,
             repo_id=BASE_REPO,
             repo_type="model",
             commit_message=f"Base model {model_key} at step {step}"
         )
         
-        print(f"   ✅ Uploaded base model to {BASE_REPO}/{model_key}")
+        print(f"   ✅ Uploaded base model to {BASE_REPO}/{hf_path}")
         
         # Cleanup
         import shutil

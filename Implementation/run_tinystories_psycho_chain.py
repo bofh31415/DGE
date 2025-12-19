@@ -87,7 +87,7 @@ CONFIG = {
 # Use unified HF repo manager
 from hf_repo_manager import HFRepoManager, wait_for_uploads
 HF_MANAGER = HFRepoManager("german_psycho")
-HF_REPO = "darealSven/dge-models"
+HF_REPO = "darealSven/dge"
 
 # ============================================================================
 # MAIN EXPERIMENT

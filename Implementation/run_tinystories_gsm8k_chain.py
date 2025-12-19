@@ -131,7 +131,7 @@ CONFIG = {
 # HuggingFace Hub configuration - Now uses unified repo structure
 from hf_repo_manager import HFRepoManager, wait_for_uploads
 HF_MANAGER = HFRepoManager("tinystories_gsm8k")
-HF_REPO = "darealSven/dge-models"  # Unified repo
+HF_REPO = "darealSven/dge"  # Unified repo
 
 # ============================================================================
 # GIT BACKUP FOR LOGS
@@ -1306,7 +1306,8 @@ def run_experiment():
     print("=" * 70)
     
     hf_token = os.environ.get("HF_TOKEN")
-    hf_repo = "darealSven/dge-tinystories-gsm8k"
+    # Use unified repo
+    hf_repo = HF_REPO 
     
     if hf_token:
         try:
@@ -1321,10 +1322,11 @@ def run_experiment():
             except Exception as e:
                 print(f"   ⚠️ Repo creation note: {e}")
             
-            # Upload entire output directory
-            print(f"   📤 Uploading {CONFIG['output_dir']}...")
+            # Upload entire output directory to experiment subfolder
+            print(f"   📤 Uploading {CONFIG['output_dir']} to {hf_repo}/tinystories_gsm8k...")
             api.upload_folder(
                 folder_path=CONFIG["output_dir"],
+                path_in_repo="tinystories_gsm8k", # Store in subfolder
                 repo_id=hf_repo,
                 repo_type="model",
                 commit_message=f"DGE Experiment Results - {datetime.now().isoformat()}"

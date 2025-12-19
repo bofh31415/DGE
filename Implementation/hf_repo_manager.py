@@ -29,7 +29,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 # Central HF repository for all DGE models
-HF_REPO = "darealSven/dge-models"
+HF_REPO = "darealSven/dge"
 
 # Background upload queue
 _upload_queue = queue.Queue()

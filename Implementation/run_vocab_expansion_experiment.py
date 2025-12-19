@@ -89,7 +89,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Use unified HF repo manager
 from hf_repo_manager import HFRepoManager, wait_for_uploads
 HF_MANAGER = HFRepoManager("vocab_expansion")
-HF_REPO = "darealSven/dge-models"
+HF_REPO = "darealSven/dge"
 
 # ============================================================================
 # CHECKPOINTING (Reuse from GSM8K chain)
