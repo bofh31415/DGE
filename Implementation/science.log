@@ -358,3 +358,31 @@ logits = base_head(h) + Σ skill_head_i(h)
 1. Restart terminal to clear bytecode cache
 2. Debug `add_skill_head()` not being reached during `expand_for_skill()`
 3. Merge to master after tests pass
+
+---
+
+## V 0.14.0: RunPod API Automation (Experimental)
+**Date:** 2025-12-20  
+**Branch:** `exp/hierarchical-output`
+
+### Goal
+Automate the deployment and management of experiments on RunPod to enable "fire and forget" execution.
+
+### Key Changes
+- `runpod_manager.py`: Lightweight GraphQL client for RunPod API.
+- `deploy_experiment()`: Automatically requests a pod, clones the repo, installs dependencies, and starts the experiment in a detached `tmux` session.
+- `experiment_lab.py`: Integrated "Remote RunPod Deploy" option into the menu.
+- Safety: Explicit warnings about costs and termination support.
+
+### Architecture
+1. **Local**: `experiment_lab.py` -> `runpod_manager.py` (GraphQL API).
+2. **Cloud**: `podFindAndDeployOnDemand` -> `Startup Script` (Clone + Pip + Run).
+3. **Persistence**: Results auto-uploaded to HuggingFace via existing logic.
+
+### Known Issues
+- Requires `RUNPOD_API_KEY` in `.env`.
+- Startup script assumes a Pytorch base image with `apt-get` and `bash`.
+
+### Next Steps
+1. Verify pod creation with a test script.
+2. Monitor cost effectiveness of automated termination.

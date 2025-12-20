@@ -1,1 +1,1 @@
-__version__ = "V 0.13.0"  # Hierarchical Output Architecture (Experimental)
+__version__ = "V 0.14.0"  # RunPod API Automation (Experimental)

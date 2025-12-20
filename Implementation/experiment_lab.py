@@ -41,6 +41,7 @@ class ExperimentLab:
             print("2. [Med]  Language Composition (cat -> Katze + s -> plural)")
             print("3. [Med]  Style Transfer (happy -> HAPPY -> HAPPY!!!)")
             print("4. [Slow] Modular Counting (2+4 -> 6 -> oooooo)")
+            print("5. [NEW]  Remote RunPod Deploy (Fire & Forget)")
             print("q. Exit")
             
             choice = input("\nSelect Option: ").strip().lower()
@@ -56,8 +57,54 @@ class ExperimentLab:
             elif choice == '4':
                 print("🚧 Verification Pending: Implement Modular Counting")
                 time.sleep(1)
+            elif choice == '5':
+                self.runpod_deploy_ui()
             elif choice == 'q':
                 sys.exit(0)
+                
+    def runpod_deploy_ui(self):
+        """UI for deploying an experiment to RunPod."""
+        self.clear_screen()
+        print("🚀 Remote RunPod Deployment")
+        print("-" * 30)
+        
+        # Check for RunPod API Key
+        import runpod_manager
+        try:
+            pods = runpod_manager.list_pods()
+            print(f"Active Pods: {len(pods)}")
+        except Exception as e:
+            print(f"⚠️ RunPod API Error: {e}")
+            print("Make sure RUNPOD_API_KEY is in your .env")
+            input("\nPress Enter to return...")
+            return
+
+        print("\nCommon Commands:")
+        print("1. Symbol Generation (Fast)")
+        print("2. TinyStories to GSM8K (Slow)")
+        print("3. Custom Command")
+        
+        cmd_choice = input("\nSelect Command (default 1): ").strip()
+        
+        if cmd_choice == '2':
+            command = "python run_tinystories_gsm8k_chain.py"
+        elif cmd_choice == '3':
+            command = input("Enter custom bash command: ").strip()
+        else:
+            command = "python run_synergy_experiment.py" # Shortcut for symbol test
+            
+        gpu_type = input("GPU Type (default RTX 4090): ").strip() or "NVIDIA GeForce RTX 4090"
+        
+        confirm = input(f"\nDeploy '{command}' to {gpu_type}? (y/n): ").strip().lower()
+        if confirm == 'y':
+            try:
+                pod_id = runpod_manager.deploy_experiment(command, gpu_type=gpu_type)
+                print(f"\n✅ Deployment initiated! Pod ID: {pod_id}")
+                print("The pod will configure itself and start the experiment in a tmux session.")
+            except Exception as e:
+                print(f"❌ Deployment failed: {e}")
+                
+        input("\nPress Enter to return...")
 
     # --- EXPERIMENT 1: SYMBOL GENERATION ---
     def run_symbol_experiment(self):
