@@ -203,14 +203,19 @@ def display_gpu_selection_menu(gpus):
 def select_gpu_interactive():
     """
     Interactive sequence to select a GPU and deployment mode.
-    Returns: (gpu_id, is_spot_mode)
+    Returns: (gpu_id, is_spot_mode, cost_per_hr)
     """
-    print("\n🔍 Fetching latest GPU pricing and availability...")
+    import time as t
+    start = t.time()
+    print("\n🔍 Fetching latest GPU pricing...", end='', flush=True)
     gpus = get_available_gpus()
+    elapsed = t.time() - start
+    print(f" ({elapsed:.1f}s)")
     
     if not gpus:
         print("❌ No GPUs found available via RunPod API.")
-        return None, True
+        return None, True, 0
+
 
     display_gpu_selection_menu(gpus)
     
@@ -272,10 +277,10 @@ def select_gpu_interactive():
         
         confirm = input(f"\n🚀 Deploy on {selected_gpu['name']} [{mode_str}] @ ${cost:.2f}/hr? (y/n): ")
         if confirm.lower() == 'y':
-            return selected_gpu['id'], is_spot
+            return selected_gpu['id'], is_spot, cost
         else:
             print("❌ Deployment cancelled.")
-            return None, True
+            return None, True, 0
 
 def find_cheapest_gpu(gpu_display_name="NVIDIA GeForce RTX 4090"):
     """
@@ -298,35 +303,41 @@ def find_cheapest_gpu(gpu_display_name="NVIDIA GeForce RTX 4090"):
     # Fallback
     return "NVIDIA GeForce RTX 4090", 0.69
 
-def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, is_spot=True):
+def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, is_spot=True, price=None):
     """
     Deploy a pod, clone the repo, setup env, and run the experiment.
     'Fire and forget' mode.
     """
     if gpu_type is None:
-        gpu_type, price = find_cheapest_gpu()
+        gpu_type, found_price = find_cheapest_gpu()
+        price = found_price if price is None else price
     else:
-        price = "Unknown"
+        if price is None:
+             price = "Unknown"
         
     label = " (SPOT Instance)" if is_spot else " (ON-DEMAND)"
     print(f"🚀 Deploying remote experiment on {gpu_type}{label}...")
-    print(f"📈 Estimated Cost: ${price}/hr")
+    
+    price_str = f"${price:.2f}" if isinstance(price, (int, float)) else str(price)
+    print(f"📈 Estimated Cost: {price_str}/hr")
     
     # Construct the robust startup command
-    # V0.18.0: Simplified to avoid nested quote issues
+    # V0.19.0: Added progress echo statements for visibility
     cleanup_step = " && python -m experiments.pod_cleanup" if auto_terminate else ""
     repo_name = os.getenv("HF_REPO", "darealSven/dge")
     
-    # Use double quotes for outer, escape inner quotes
+    # Progress-tracked setup command
     setup_cmd = (
-        f"apt-get update && apt-get install -y git && "
-        f"git clone https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
-        f"cd DGE/Implementation && "
-        f"pip install -r requirements.txt && "
+        "echo '🚀 [1/5] Updating apt...' && apt-get update -qq && "
+        "echo '📦 [2/5] Installing git...' && apt-get install -y git -qq && "
+        f"echo '📂 [3/5] Cloning repo...' && git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
+        "cd DGE/Implementation && "
+        "echo '🐍 [4/5] Installing Python dependencies (this takes 2-3 min)...' && pip install -q -r requirements.txt && "
         f"export HF_TOKEN={HF_TOKEN} && "
         f"export GIT_TOKEN={GIT_TOKEN} && "
         f"export RUNPOD_API_KEY={RUNPOD_API_KEY} && "
         f"export HF_REPO={repo_name} && "
+        f"echo '✅ [5/5] Starting experiment: {command}' && "
         f"{command}{cleanup_step}"
     )
 
@@ -350,11 +361,13 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
             "imageName": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
             "containerDiskInGb": 40,
             "volumeInGb": 40,
+            "volumeMountPath": "/workspace",
             "ports": "5000/http,22/tcp",
             "startSsh": True,
             "dockerArgs": setup_cmd
         }
     }
+
 
     
     data = run_query(mutation, variables)
@@ -366,11 +379,12 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     
     
     # Wait for pod to actually start (with timeout)
-    timeout_seconds = 120  # Reduced to 2 minutes
-    poll_interval = 10
+    timeout_seconds = 300  # 5 minutes to allow for pip install
+    poll_interval = 15  # Check less frequently
     elapsed = 0
     
-    print(f"⏳ Waiting for pod runtime to start (Timeout: {timeout_seconds}s)...")
+    print(f"\n⏳ Waiting for container startup (Timeout: {timeout_seconds}s)...")
+    print("   Note: 'pip install' takes 2-3 minutes. Check RunPod Console for live logs.")
     
     while elapsed < timeout_seconds:
         remaining = timeout_seconds - elapsed

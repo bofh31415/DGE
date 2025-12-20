@@ -155,14 +155,21 @@ class DGEDashboard:
             print("--- RUNPOD MISSION CONTROL ---")
             
             try:
+                import time as t
+                start = t.time()
+                print("⏳ Querying pods...", end='', flush=True)
                 pods = runpod_manager.list_pods()
+                elapsed = t.time() - start
+                print(f" ({elapsed:.1f}s)")
+                
                 if not pods:
                     print("No active pods.")
                 else:
                     for p in pods:
                         print(f"[{p['id']}] {p['gpuTypeId']} - {p['status']} (Uptime: {p['runtime']['uptimeInSeconds']}s)")
             except Exception as e:
-                print(f"⚠️ RunPod API Error: {e}")
+                print(f"\n⚠️ RunPod API Error: {e}")
+
                 
             print("\nOptions:")
             print("1. Refresh List")
@@ -299,11 +306,20 @@ class DGEDashboard:
             input("\nPress Enter...")
             return
             
-        gpu_id, is_spot = result
+        gpu_id, is_spot, cost = result
         
         # Deploy
-        runpod_manager.deploy_experiment(cmd, gpu_type=gpu_id, is_spot=is_spot)
-        input("\n✅ Pod initiated. Press Enter...")
+        try:
+            runpod_manager.deploy_experiment(
+                cmd, 
+                gpu_type=gpu_id, 
+                is_spot=is_spot, 
+                price=cost
+            )
+            input("\n✅ Pod initiated. Press Enter...")
+        except Exception as e:
+            print(f"\n❌ Deployment failed: {e}")
+            input("\nPress Enter...")
 
     # --- SYNC OPERATIONS ---
     def sync_results_ui(self):
