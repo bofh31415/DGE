@@ -1,12 +1,17 @@
 # RunPod Deployment Guide - DGE TinyStories → GSM8K
+**Updated for V 0.18.0 (Package Structure)**
 
+> [!NOTE]
+> As of V0.18.0, the codebase is organized into packages: `core/`, `cloud/`, `experiments/`, etc.
+> Experiment scripts are now in `experiments/` subdirectory.
 
+```bash
 mkdir DGE && cd DGE
 git init
 git remote add origin https://${GIT_TOKEN}@github.com/bofh31415/DGE.git
 git config core.sparseCheckout true
 echo "Implementation/" >> .git/info/sparse-checkout
-git pull origin master
+git pull origin exp/hierarchical-output  # Use the refactored branch
 cd Implementation
 
 # INSTALL & RUN (With Cache Redirect!)
@@ -15,7 +20,8 @@ export HF_HOME=/workspace/hf_cache
 # Use .env for tokens (See Section 3) or export manually
 # export HF_TOKEN=hf_YOUR_WRITE_TOKEN
    
-python run_tinystories_gsm8k_chain.py
+python -m experiments.run_tinystories_gsm8k_chain  # V0.18.0: Use module syntax
+```
 
 ## Tokens Needed
 
