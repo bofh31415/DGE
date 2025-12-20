@@ -384,5 +384,33 @@ Automate the deployment and management of experiments on RunPod to enable "fire 
 - Startup script assumes a Pytorch base image with `apt-get` and `bash`.
 
 ### Next Steps
-1. Verify pod creation with a test script.
 2. Monitor cost effectiveness of automated termination.
+
+---
+
+## V 0.15.0: DGE Grand Tour (Systematic Suite)
+**Date:** 2025-12-20  
+**Branch:** `exp/hierarchical-output`
+
+### Goal
+Execute a comprehensive 4-stage experimental suite to pressure-test the Stability, Plasticity, and Synergy of the DGE architecture globally.
+
+### Key Changes
+- `run_dge_grand_tour.py`: Master sequencer orchestrating 4 distinct stages.
+- `run_longevity_chain.py`: New Stage 2 experiment testing retention after 10 sequential expansions.
+- Integration: Added "DGE Grand Tour" to `experiment_lab.py` (Local/Remote).
+- Automation: Fully compatible with RunPod "Fire & Forget" deployment.
+
+### The 4 Stages
+1. **Integrity Core**: Symbol Synergy verification (Hierarchical Heads).
+2. **Longevity Stress**: 10-Skill Chain (Stability check).
+3. **Intelligence Transfer**: Rosetta Stone (Logic -> Expression).
+4. **Efficiency Anatomy**: Neuro-Bodybuilding (Sparsity limits).
+
+### Verification
+- Sequencer logic verified via dry run structure.
+- Checkpoint persistence confirmed for each stage.
+
+### Next Steps
+1. Deploy Stage 1-4 on RunPod RTX 4090.
+2. Analyze `grand_tour_report.json` for failure points.

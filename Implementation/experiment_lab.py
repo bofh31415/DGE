@@ -42,6 +42,7 @@ class ExperimentLab:
             print("3. [Med]  Style Transfer (happy -> HAPPY -> HAPPY!!!)")
             print("4. [Slow] Modular Counting (2+4 -> 6 -> oooooo)")
             print("5. [NEW]  Remote RunPod Deploy (Fire & Forget)")
+            print("6. [🔥]  DGE Grand Tour (4 Stages - Systematic Suite)")
             print("q. Exit")
             
             choice = input("\nSelect Option: ").strip().lower()
@@ -59,8 +60,24 @@ class ExperimentLab:
                 time.sleep(1)
             elif choice == '5':
                 self.runpod_deploy_ui()
+            elif choice == '6':
+                self.run_grand_tour_locally()
             elif choice == 'q':
                 sys.exit(0)
+
+    def run_grand_tour_locally(self):
+        """Orchestrates the Grand Tour locally."""
+        self.clear_screen()
+        print("🌍 DGE Grand Tour - Local Execution")
+        print("-" * 50)
+        print("This will execute Stage 1 -> Stage 4 sequentially.")
+        print("Note: Stages 3 and 4 are heavy. RunPod recommended.")
+        
+        confirm = input("\nStart Grand Tour now? (y/n): ").strip().lower()
+        if confirm == 'y':
+            import run_dge_grand_tour
+            run_dge_grand_tour.main()
+            input("\nGrand Tour Finished. Press Enter...")
                 
     def runpod_deploy_ui(self):
         """UI for deploying an experiment to RunPod."""
