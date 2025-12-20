@@ -103,8 +103,9 @@ class DGESimpleTransformer(nn.Module):
         self.pos_emb = nn.Parameter(torch.zeros(1, max_seq_len, d_model))
         self.layers = nn.ModuleList([DGEBlock(d_model, n_head) for _ in range(n_layer)])
         
-        # Initialize Base Head with Gating if requested
-        self.lm_head = MoEGatedLinear(d_model, vocab_size, bias=False, initial_gating=initial_gating, router_type=router_type)
+        # V 0.13.0: Use HierarchicalOutputHead for skill-isolated additive synergy
+        from dge_utils import HierarchicalOutputHead
+        self.lm_head = HierarchicalOutputHead(d_model, vocab_size)
         
     def forward(self, idx, targets=None, sparsity_lambda=0.05, base_only=False):
         B, T = idx.size()
@@ -224,28 +225,27 @@ class DGESimpleTransformer(nn.Module):
                          use_gradient_rescue=use_gradient_rescue, use_orthogonal_init=use_orthogonal_init, isolate_cross_terms=isolate_cross_terms, cross_term_policy=cross_term_policy, router_init_bias=router_init_bias, gating_threshold=gating_threshold) 
 
         # Expand Head
-        # The instruction snippet had `ge_linear(self.lm_head, added_in=added_d_model, added_out=0, frozen_core_pos=quadrant)`
-        # which is a partial line. I will reconstruct it based on the original and new parameters.
-        # The original `lm_head` expansion used `added_d_model` for `added_in` and `quadrant`.
-        # `new_output_dim` could be used for `added_out` if vocab_size is changing.
-        # For now, I'll assume `added_out` is 0 as in the original, unless `new_output_dim` implies a change.
-        # If `new_output_dim` is meant to change the vocab_size, then `added_out` should be `new_output_dim - self.lm_head.out_features`.
-        # Given the instruction, it's ambiguous. I'll stick to the original `added_out=0` for `lm_head` for now,
-        # as the primary expansion seems to be `d_model`.
-        # Expand LM Head
-        self.lm_head = expand_dge_linear(
-            self.lm_head, 
-            added_in=added_d_model, 
-            added_out=0, 
-            frozen_core_pos=Quadrant.TOP_LEFT, 
-            isolate_cross_terms=isolate_cross_terms,
-            cross_term_policy=cross_term_policy, # V 0.9.4: Use passed policy for retention
-            router_type=router_type,
-            use_gradient_rescue=use_gradient_rescue,
-            use_orthogonal_init=use_orthogonal_init,
-            router_init_bias=router_init_bias,
-            gating_threshold=gating_threshold
-        )
+        # V 0.13.0: Skip if HierarchicalOutputHead (handles skills via add_skill_head())
+        from dge_utils import HierarchicalOutputHead
+        if not isinstance(self.lm_head, HierarchicalOutputHead):
+            # Legacy path: expand MoEGatedLinear lm_head
+            self.lm_head = expand_dge_linear(
+                self.lm_head, 
+                added_in=added_d_model, 
+                added_out=0, 
+                frozen_core_pos=Quadrant.TOP_LEFT, 
+                isolate_cross_terms=isolate_cross_terms,
+                cross_term_policy=cross_term_policy,
+                router_type=router_type,
+                use_gradient_rescue=use_gradient_rescue,
+                use_orthogonal_init=use_orthogonal_init,
+                router_init_bias=router_init_bias,
+                gating_threshold=gating_threshold
+            )
+        else:
+            # V 0.13.0: HierarchicalOutputHead - update d_model for base_head
+            # Skill heads are added via add_skill_head() in expand_for_skill()
+            self.lm_head.update_d_model(new_input_dim)
         
         self.d_model = new_input_dim # Update d_model to the new value
         print("Expansion Complete.")
@@ -280,7 +280,7 @@ class DGESimpleTransformer(nn.Module):
         
         # Expand
         new_d_model = self.d_model + expansion_delta
-        print(f"\n🎯 Expanding for Skill '{skill_name}' (ID: {skill_id})")
+        print(f"\nExpanding for Skill '{skill_name}' (ID: {skill_id})")
         self.expand_model(
             new_input_dim=new_d_model,
             new_output_dim=new_d_model, # Assuming symmetric vocab for now
@@ -288,6 +288,9 @@ class DGESimpleTransformer(nn.Module):
             router_init_bias=0.0, # Open by default
             cross_term_policy='full'
         )
+        
+        # V 0.13.0: Add skill-specific output head
+        head_id = self.lm_head.add_skill_head(router_type=router_type)
         
         # Capture new params
         post_params = set(id(p) for p in self.parameters())
@@ -299,7 +302,8 @@ class DGESimpleTransformer(nn.Module):
             'new_d_model': new_d_model,
             'router_type': router_type,
             'frozen': False,
-            'params': new_params
+            'params': new_params,
+            'head_id': head_id  # V 0.13.0: Track skill head ID
         }
         
         print(f"   Skill '{skill_name}' registered with ID {skill_id} ({len(new_params)} new params)")
@@ -309,8 +313,7 @@ class DGESimpleTransformer(nn.Module):
         """
         Freeze a skill's parameters (routers + weights) to prevent forgetting.
         
-        V 0.12.0: Now freezes BOTH router AND weight regions.
-        Weight regions are frozen via gradient masking (dge_mask).
+        V 0.13.0: Now freezes dedicated skill output head for true isolation.
         """
         if not hasattr(self, '_skill_registry') or skill_id not in self._skill_registry:
             raise ValueError(f"Skill ID {skill_id} not found.")
@@ -327,30 +330,27 @@ class DGESimpleTransformer(nn.Module):
                 p.requires_grad = False
                 router_count += 1
         
-        # 2. Freeze weight regions via gradient masking
-        # The skill owns columns [old_d_model : new_d_model]
+        # 2. V 0.13.0: Freeze skill-specific output head
+        head_id = skill.get('head_id', skill_id)
+        self.lm_head.freeze_skill_head(head_id)
+        
+        # 3. Freeze weight regions via gradient masking (for hidden layers)
         old_d = skill['old_d_model']
         new_d = skill['new_d_model']
         
         weight_count = 0
         for module in self.modules():
             if isinstance(module, MoEGatedLinear):
-                # Get or create dge_mask for this weight
                 if not hasattr(module.weight, 'dge_mask'):
-                    # Initialize mask to all 1s (all trainable)
                     module.weight.dge_mask = torch.ones_like(module.weight)
                 
-                # Freeze skill's input columns (affects input dimension)
-                # Weight shape: [out_features, in_features]
-                # Skill's columns: [:, old_d : new_d]
                 in_features = module.weight.shape[1]
                 if in_features >= new_d:
-                    # Freeze columns corresponding to this skill
                     module.weight.dge_mask[:, old_d:new_d] = 0.0
                     weight_count += module.weight[:, old_d:new_d].numel()
                     
         skill['frozen'] = True
-        print(f"Skill '{skill['name']}' (ID: {skill_id}) frozen: {router_count} router params, {weight_count} weight elements masked.")
+        print(f"Skill '{skill['name']}' (ID: {skill_id}) frozen: {router_count} router params, head frozen, {weight_count} weight elements masked.")
 
     # =========================================================================
     # SKILL MANAGEMENT API (V 0.9.6: Router0 Always IDK Architecture)

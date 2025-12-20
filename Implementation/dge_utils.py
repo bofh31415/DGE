@@ -725,6 +725,158 @@ class MoEGatedLinear(nn.Module):
             return sum(confidences) / len(confidences)
         return 1.0  # Default: fully confident (no gating)
 
+
+class HierarchicalOutputHead(nn.Module):
+    """
+    V 0.13.0: Hierarchical Output Architecture for true additive synergy.
+    
+    Each skill gets its own dedicated output head (LM head) that can be:
+    - Frozen independently after training
+    - Combined additively or via gating
+    
+    Architecture:
+        logits = base_head(h) + sum(gate_i(h) * skill_head_i(h))
+    
+    Args:
+        d_model: Hidden dimension
+        vocab_size: Output vocabulary size
+    """
+    
+    def __init__(self, d_model: int, vocab_size: int):
+        super().__init__()
+        self.d_model = d_model
+        self.vocab_size = vocab_size
+        
+        # Base head (always active)
+        self.base_head = nn.Linear(d_model, vocab_size, bias=False)
+        
+        # Skill-specific heads (added on expand)
+        self.skill_heads = nn.ModuleList()
+        self.skill_routers = nn.ModuleList()
+        
+    @property
+    def weight(self):
+        """Compatibility with expand_model() which expects .weight attribute."""
+        return self.base_head.weight
+        
+    @property
+    def shape(self):
+        """Compatibility for model introspection."""
+        return self.base_head.weight.shape
+        
+    @property
+    def bias(self):
+        """Compatibility with expand_model() which expects .bias attribute."""
+        return self.base_head.bias
+    
+    def update_d_model(self, new_d_model: int):
+        """
+        Update d_model after model expansion.
+        
+        V 0.13.0: Called during expand_model() to sync dimensions.
+        Creates new base_head with correct input dimension.
+        """
+        if new_d_model == self.d_model:
+            return
+            
+        old_d_model = self.d_model
+        self.d_model = new_d_model
+        
+        # Expand base_head: [vocab, old_d] -> [vocab, new_d]
+        old_weight = self.base_head.weight.data  # [vocab, old_d]
+        new_base_head = nn.Linear(new_d_model, self.vocab_size, bias=False)
+        
+        # Copy old weights to new (left columns)
+        new_base_head.weight.data[:, :old_d_model] = old_weight
+        # New columns start at zero (identity)
+        new_base_head.weight.data[:, old_d_model:] = 0.0
+        
+        self.base_head = new_base_head
+        
+    def add_skill_head(self, router_type: str = 'rbf') -> int:
+        """
+        Add a dedicated output head for a new skill.
+        
+        Args:
+            router_type: Type of router for gating this skill head
+            
+        Returns:
+            skill_id: Index of the new skill head
+        """
+        print(f"DEBUG: add_skill_head called with router_type={router_type}")  # DEBUG
+        # Create skill-specific head (same output dim as base)
+        head = nn.Linear(self.d_model, self.vocab_size, bias=False)
+        
+        # Initialize to zero so it starts as identity (no contribution)
+        nn.init.zeros_(head.weight)
+        
+        # Create router for this skill
+        if router_type == 'rbf':
+            router = RBFRouter(self.d_model, num_experts=1, beta_init=1.0)
+        elif router_type == 'bigram':
+            router = BigramRouter(self.d_model, num_experts=1, router_init_bias=0.0)
+        else:
+            # Simple linear router
+            router = nn.Sequential(
+                nn.Linear(self.d_model, 1),
+                nn.Sigmoid()
+            )
+            
+        self.skill_heads.append(head)
+        self.skill_routers.append(router)
+        
+        return len(self.skill_heads) - 1
+        
+    def freeze_skill_head(self, skill_id: int):
+        """Freeze a specific skill's output head."""
+        if skill_id < len(self.skill_heads):
+            for p in self.skill_heads[skill_id].parameters():
+                p.requires_grad = False
+            for p in self.skill_routers[skill_id].parameters():
+                p.requires_grad = False
+                
+    def forward(self, h: torch.Tensor, base_only: bool = False, synergy_mode: str = 'gated') -> torch.Tensor:
+        """
+        Compute output logits with hierarchical skill heads.
+        
+        Args:
+            h: Hidden states [Batch, Seq, d_model]
+            base_only: If True, only use base head (ignore skill heads)
+            synergy_mode: 'gated' or 'additive'
+            
+        Returns:
+            logits: [Batch, Seq, vocab_size]
+        """
+        # Base head contribution (always active)
+        logits = self.base_head(h)
+        
+        # V 0.13.0: If base_only, skip skill heads
+        if base_only:
+            return logits
+        
+        # Add skill head contributions
+        for head, router in zip(self.skill_heads, self.skill_routers):
+            skill_logits = head(h)
+            
+            if synergy_mode == 'additive':
+                # All skills contribute equally
+                logits = logits + skill_logits
+            else:
+                # Gated contribution
+                gate = router(h)  # [Batch, Seq, 1] or [Batch, Seq, d_model]
+                
+                # Handle different gate shapes
+                if gate.dim() == 3 and gate.shape[-1] == 1:
+                    # Scalar gate per position
+                    logits = logits + gate * skill_logits
+                else:
+                    # Average gate value for scalar gating
+                    gate_scalar = gate.mean(dim=-1, keepdim=True)
+                    logits = logits + gate_scalar * skill_logits
+                    
+        return logits
+
+
 def expand_dge_linear(
     layer: Union[nn.Linear, MoEGatedLinear], 
     added_in: int, 
