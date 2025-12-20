@@ -292,24 +292,18 @@ class DGEDashboard:
         elif c == 'q': return
         else: return
         
-        print(f"\n📋 Command: {cmd}")
-        print("\n🔍 Fetching available GPUs...")
-        
-        # Interactive GPU selection
-        gpu_id, price = runpod_manager.select_gpu_interactive()
-        
-        if gpu_id is None:
+        # Interactive GPU selection (handles confirmation internally)
+        result = runpod_manager.select_gpu_interactive()
+        if not result or not result[0]:
             print("Deployment cancelled.")
             input("\nPress Enter...")
             return
+            
+        gpu_id, is_spot = result
         
-        confirm = input(f"\n🚀 Deploy '{cmd}' on {gpu_id}? (y/n): ").strip().lower()
-        if confirm == 'y':
-            runpod_manager.deploy_experiment(cmd, gpu_type=gpu_id)
-            input("\n✅ Pod initiated. Press Enter...")
-        else:
-            print("Deployment cancelled.")
-            input("\nPress Enter...")
+        # Deploy
+        runpod_manager.deploy_experiment(cmd, gpu_type=gpu_id, is_spot=is_spot)
+        input("\n✅ Pod initiated. Press Enter...")
 
     # --- SYNC OPERATIONS ---
     def sync_results_ui(self):

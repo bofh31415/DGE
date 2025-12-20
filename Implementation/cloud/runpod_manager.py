@@ -114,33 +114,44 @@ def get_available_gpus():
         
         result = []
         for g in gpus:
-            # Use communityPrice (spot) if available, otherwise securePrice
-            price = g.get('communityPrice') or g.get('securePrice')
-            if not price or price <= 0:
-                continue
-                
             gpu_id = g['id']
             name = g['displayName']
+            
+            # Prices
+            spot_price = g.get('communityPrice')
+            secure_price = g.get('securePrice')
+            
+            # Skip if both are unavailable
+            if (not spot_price or spot_price <= 0) and (not secure_price or secure_price <= 0):
+                continue
+                
             vram = g.get('memoryInGb', 0)
             
             # Lookup performance data
-            perf = GPU_PERFORMANCE.get(name, {"tflops": 20.0, "vram": vram})  # Default estimate
+            perf = GPU_PERFORMANCE.get(name, {"tflops": 20.0, "vram": vram})
             tflops = perf['tflops']
             
-            # Value score: TFLOPS per dollar per hour
-            value_score = tflops / price if price > 0 else 0
+            # Calculate Value Scores (TFLOPS / Price)
+            val_spot = tflops / spot_price if spot_price and spot_price > 0 else 0
+            val_secure = tflops / secure_price if secure_price and secure_price > 0 else 0
+            
+            # Sorting metric: heavily favor Spot value, fallback to Secure value
+            sort_metric = max(val_spot, val_secure * 0.8) 
             
             result.append({
                 "id": gpu_id,
                 "name": name,
-                "price": price,
+                "communityPrice": spot_price,
+                "securePrice": secure_price,
                 "tflops": tflops,
                 "vram": vram,
-                "value": value_score
+                "value_spot": val_spot,
+                "value_secure": val_secure,
+                "sort_metric": sort_metric
             })
-        
-        # Sort by value score (best value first)
-        result.sort(key=lambda x: x['value'], reverse=True)
+            
+        # Sort by value (best first)
+        result.sort(key=lambda x: x['sort_metric'], reverse=True)
         return result
         
     except Exception as e:
@@ -148,56 +159,123 @@ def get_available_gpus():
         return []
 
 def display_gpu_selection_menu(gpus):
-    """Display GPU options with prices and performance metrics."""
-    print("\n" + "="*85)
-    print("                         GPU SELECTION MENU (Spot Instances)")
-    print("="*85)
-    print(f"{'Idx':<4} | {'GPU':<30} | {'$/hr':<7} | {'TFLOPS':<8} | {'VRAM':<6} | {'Value':<8} | {'⭐'}")
-    print("-"*85)
+    """
+    Display a formatted table of available GPUs with Spot and Secure prices.
+    Highlights the best value options.
+    """
+    print("\n" + "="*105)
+    print(f"{'GPU SELECTION MENU':^105}")
+    print("="*105)
     
-    best_value_idx = 0  # First one is best (sorted by value)
+    # Header
+    # Idx | GPU Name | Spot $/hr | Secure $/hr | TFLOPS | VRAM | Val(Spot) | Val(Sec) | Rec
+    header = f"{'Idx':<4} | {'GPU':<30} | {'Spot $':<9} | {'Secure $':<9} | {'TFLOPS':<8} | {'VRAM':<6} | {'Val(S)':<7} | {'Val(D)':<7} | {'⭐'}"
+    print(header)
+    print("-" * 105)
     
-    for idx, g in enumerate(gpus):
-        star = "⭐ BEST" if idx == best_value_idx else ""
-        print(f"{idx+1:<4} | {g['name']:<30} | ${g['price']:<6.2f} | {g['tflops']:<8.1f} | {g['vram']:<4}GB | {g['value']:<8.1f} | {star}")
-    
-    print("-"*85)
-    print(f"💡 Recommendation: #{1} ({gpus[0]['name']}) - Best TFLOPS per dollar!")
-    print("="*85)
-    
-    return best_value_idx
+    for i, gpu in enumerate(gpus, 1):
+        idx = str(i)
+        name = gpu['name'][:30]
+        
+        # Prices
+        spot_price = f"${gpu['communityPrice']:.2f}" if gpu['communityPrice'] else "N/A"
+        sec_price = f"${gpu['securePrice']:.2f}" if gpu.get('securePrice') and gpu['securePrice'] > 0 else "N/A"
+        
+        tflops = f"{gpu['tflops']:.1f}"
+        vram = f"{int(gpu['vram']):<3} GB"
+        
+        # Value Scores
+        val_spot = f"{gpu['value_spot']:.1f}" if gpu['communityPrice'] else "-"
+        val_sec = f"{gpu['value_secure']:.1f}" if gpu.get('securePrice') and gpu['securePrice'] > 0 else "-"
+        
+        # Star rating (based on Spot value usually)
+        star = "⭐ BEST" if i == 1 else ""
+        if gpu.get('securePrice') and gpu['securePrice'] > 0 and i <= 3:
+             star += " (Sec)"
+             
+        print(f"{idx:<4} | {name:<30} | {spot_price:<9} | {sec_price:<9} | {tflops:<8} | {vram:<6} | {val_spot:<7} | {val_sec:<7} | {star}")
+        
+    print("-" * 105)
+    print("💡 Val = TFLOPS / Price. Higher is better value.")
+    print("💡 'Secure' = Dedicated (High Reliability). 'Spot' = Interruptible (Cheaper).")
+    print("=" * 105)
 
 def select_gpu_interactive():
-    """Interactive GPU selection. Returns (gpu_id, price) or None if cancelled."""
+    """
+    Interactive sequence to select a GPU and deployment mode.
+    Returns: (gpu_id, is_spot_mode)
+    """
+    print("\n🔍 Fetching latest GPU pricing and availability...")
     gpus = get_available_gpus()
     
     if not gpus:
-        print("❌ No GPUs available. Check your RUNPOD_API_KEY.")
-        return None, None
+        print("❌ No GPUs found available via RunPod API.")
+        return None, True
+
+    display_gpu_selection_menu(gpus)
     
-    best_idx = display_gpu_selection_menu(gpus)
+    best_gpu = gpus[0]
     
     while True:
-        choice = input(f"\nSelect GPU [1-{len(gpus)}] (Enter for recommended, 'q' to cancel): ").strip().lower()
+        choice = input(f"\nSelect GPU [1-{len(gpus)}] (Enter for recommended '{best_gpu['name']}'), or 'q' to cancel: ").strip()
         
-        if choice == 'q':
-            return None, None
-        elif choice == '':
-            # Use recommended
-            selected = gpus[best_idx]
-            print(f"✅ Selected: {selected['name']} @ ${selected['price']}/hr")
-            return selected['id'], selected['price']
+        if choice.lower() == 'q':
+            return None, True
+            
+        selected_gpu = None
+        if not choice:
+            selected_gpu = best_gpu
         else:
             try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(gpus):
-                    selected = gpus[idx]
-                    print(f"✅ Selected: {selected['name']} @ ${selected['price']}/hr")
-                    return selected['id'], selected['price']
+                idx = int(choice)
+                if 1 <= idx <= len(gpus):
+                    selected_gpu = gpus[idx-1]
                 else:
-                    print("Invalid selection. Try again.")
+                    print("❌ Invalid index.")
+                    continue
             except ValueError:
-                print("Invalid input. Enter a number or press Enter for recommended.")
+                print("❌ Invalid input.")
+                continue
+        
+        # Now ask for Mode (Spot vs Secure)
+        print(f"\n✅ Selected: {selected_gpu['name']}")
+        
+        has_spot = selected_gpu['communityPrice'] and selected_gpu['communityPrice'] > 0
+        has_secure = selected_gpu.get('securePrice') and selected_gpu['securePrice'] > 0
+        
+        if not has_spot and not has_secure:
+            print("❌ Error: This GPU has no valid pricing logic.")
+            return None, True
+            
+        print("\nSelect Deployment Mode:")
+        if has_spot:
+            print(f"1. Spot (Community)   - ${selected_gpu['communityPrice']:.2f}/hr  (Interruptible, cheaper)")
+        if has_secure:
+            print(f"2. Secure (Dedicated) - ${selected_gpu['securePrice']:.2f}/hr  (Reliable, no interruptions)")
+            
+        mode_choice = input("\nSelect Mode [1/2] (Enter for Spot if available): ").strip()
+        
+        is_spot = True
+        if mode_choice == '2':
+            if has_secure:
+                is_spot = False # Secure
+            else:
+                print("❌ Secure mode not available for this GPU.")
+                continue
+        elif mode_choice == '1' or mode_choice == '':
+             if not has_spot:
+                 print("❌ Spot mode not available per metrics, trying Secure...")
+                 is_spot = False
+        
+        mode_str = "SPOT" if is_spot else "SECURE (Dedicated)"
+        cost = selected_gpu['communityPrice'] if is_spot else selected_gpu['securePrice']
+        
+        confirm = input(f"\n🚀 Deploy on {selected_gpu['name']} [{mode_str}] @ ${cost:.2f}/hr? (y/n): ")
+        if confirm.lower() == 'y':
+            return selected_gpu['id'], is_spot
+        else:
+            print("❌ Deployment cancelled.")
+            return None, True
 
 def find_cheapest_gpu(gpu_display_name="NVIDIA GeForce RTX 4090"):
     """
@@ -292,8 +370,11 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     poll_interval = 10
     elapsed = 0
     
-    print(f"⏳ Waiting for pod runtime to start (timeout: {timeout_seconds}s)...")
+    print(f"⏳ Waiting for pod runtime to start (Timeout: {timeout_seconds}s)...")
+    
     while elapsed < timeout_seconds:
+        remaining = timeout_seconds - elapsed
+        print(f"   ⏱️ Time remaining: {remaining}s | Status: Checking...", end='\r')
         time.sleep(poll_interval)
         elapsed += poll_interval
         
@@ -303,13 +384,17 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
             if our_pod:
                 runtime = our_pod.get('runtime', {})
                 uptime = runtime.get('uptimeInSeconds', 0)
+                status = our_pod.get('status', 'UNKNOWN')
+                
                 if uptime > 0:
-                    print(f"✅ Pod runtime started! Uptime: {uptime}s")
+                    print(f"\n✅ Pod runtime started! Uptime: {uptime}s")
                     return pod_id
                 else:
-                    print(f"   Waiting... ({elapsed}s elapsed, status: {our_pod.get('status', 'UNKNOWN')})")
+                    print(f"   ⏱️ Time remaining: {remaining}s | Status: {status}   ", end='\r')
         except Exception as e:
-            print(f"   Poll error: {e}")
+            print(f"\n   Poll error: {e}")
+            
+    print() # Newline after loop
     
     print(f"⚠️ Pod did not start within {timeout_seconds}s.")
     print(f"🛑 Auto-terminating stuck pod {pod_id} to prevent ghost charges...")
