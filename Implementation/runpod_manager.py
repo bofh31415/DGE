@@ -40,7 +40,7 @@ def deploy_experiment(command, gpu_type="NVIDIA GeForce RTX 4090", gpu_count=1):
     Deploy a pod, clone the repo, setup env, and run the experiment.
     'Fire and forget' mode.
     """
-    print(f"🚀 Deploying remote experiment on {gpu_type}...")
+    print(f"🚀 Deploying remote experiment on {gpu_type} (40GB Encrypted Storage)...")
     
     # Construct the robust startup command
     # Use tmux to ensure process survives terminal disconnect
@@ -72,6 +72,7 @@ def deploy_experiment(command, gpu_type="NVIDIA GeForce RTX 4090", gpu_count=1):
             "imageName": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
             "containerDiskInGb": 40,
             "volumeInGb": 40,
+            "volumeEncrypted": True,
             "dockerArgs": f"bash -c '{setup_cmd}'"
         }
     }
