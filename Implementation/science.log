@@ -324,3 +324,37 @@ True additive synergy (where both skill outputs combine) requires architectural 
 ### Version
 **V 0.12.0** - Released 2025-12-20
 
+---
+
+## V 0.13.0: Hierarchical Output Architecture (Experimental)
+**Date:** 2025-12-20  
+**Branch:** `exp/hierarchical-output`
+
+### Goal
+Enable true additive synergy by giving each skill a **dedicated output head** instead of sharing weights.
+
+### Key Changes
+- `HierarchicalOutputHead` class: `base_head` + `skill_heads` ModuleList
+- `add_skill_head()`: Creates skill-specific LM head (initialized to zero)
+- `freeze_skill_head()`: Freezes individual skill head
+- `update_d_model()`: Syncs base_head with model expansion
+- `synergy_mode='additive'`: All skill heads contribute
+
+### Test Status
+- 37 tests, 3 failures, 3 errors, 1 skipped
+- Failures: `test_hierarchical_output.py`, `test_skill_management.py` (expected - WIP)
+- Cache issue: Python bytecode not refreshing (needs terminal restart)
+
+### Architecture
+```
+logits = base_head(h) + Σ skill_head_i(h)
+```
+
+### Known Issues
+- Python bytecode cache persisting despite __pycache__ clearing
+- `expand_for_skill()` not calling `add_skill_head()` in runtime (cache)
+
+### Next Steps
+1. Restart terminal to clear bytecode cache
+2. Debug `add_skill_head()` not being reached during `expand_for_skill()`
+3. Merge to master after tests pass

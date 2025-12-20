@@ -1,1 +1,1 @@
-__version__ = "V 0.12.0"  # Additive Synergy Mode + freeze_skill weight regions
+__version__ = "V 0.13.0"  # Hierarchical Output Architecture (Experimental)

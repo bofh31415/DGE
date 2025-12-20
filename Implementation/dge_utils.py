@@ -803,7 +803,6 @@ class HierarchicalOutputHead(nn.Module):
         Returns:
             skill_id: Index of the new skill head
         """
-        print(f"DEBUG: add_skill_head called with router_type={router_type}")  # DEBUG
         # Create skill-specific head (same output dim as base)
         head = nn.Linear(self.d_model, self.vocab_size, bias=False)
         
