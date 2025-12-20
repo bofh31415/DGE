@@ -1,1 +1,1 @@
-__version__ = "V 0.15.0"  # DGE Grand Tour (Systematic Suite)
+__version__ = "V 0.16.0"  # Unified Commander Dashboard (Mission Control)

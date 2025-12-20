@@ -35,15 +35,19 @@ def run_query(query, variables=None):
         
     return result['data']
 
-def deploy_experiment(command, gpu_type="NVIDIA GeForce RTX 4090", gpu_count=1):
+
+def deploy_experiment(command, gpu_type="NVIDIA GeForce RTX 4090", gpu_count=1, auto_terminate=True):
     """
     Deploy a pod, clone the repo, setup env, and run the experiment.
     'Fire and forget' mode.
     """
-    print(f"🚀 Deploying remote experiment on {gpu_type} (40GB Encrypted Storage)...")
+    label = " (Auto-Terminate)" if auto_terminate else ""
+    print(f"🚀 Deploying remote experiment on {gpu_type} (40GB Encrypted Storage){label}...")
     
     # Construct the robust startup command
-    # Use tmux to ensure process survives terminal disconnect
+    # V0.16.0: Added pod_cleanup.py execution at the end
+    cleanup_step = " && python pod_cleanup.py" if auto_terminate else ""
+    
     setup_cmd = (
         f"apt-get update && apt-get install -y git tmux && "
         f"git clone https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
@@ -52,7 +56,8 @@ def deploy_experiment(command, gpu_type="NVIDIA GeForce RTX 4090", gpu_count=1):
         f"echo 'HF_TOKEN={HF_TOKEN}' > .env && "
         f"echo 'GIT_TOKEN={GIT_TOKEN}' >> .env && "
         f"echo 'RUNPOD_API_KEY={RUNPOD_API_KEY}' >> .env && "
-        f"tmux new -d -s experiment 'source .env && {command}'"
+        f"echo 'RUNPOD_POD_ID='$(printenv RUNPOD_POD_ID) >> .env && " # Capture Pod ID from RunPod system env
+        f"tmux new -d -s experiment 'source .env && {command}{cleanup_step}'"
     )
 
     mutation = """

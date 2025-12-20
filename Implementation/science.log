@@ -412,5 +412,36 @@ Execute a comprehensive 4-stage experimental suite to pressure-test the Stabilit
 - Checkpoint persistence confirmed for each stage.
 
 ### Next Steps
-1. Deploy Stage 1-4 on RunPod RTX 4090.
 2. Analyze `grand_tour_report.json` for failure points.
+
+---
+
+## V 0.16.0: Unified Commander (Mission Control)
+**Date:** 2025-12-20  
+**Branch:** `exp/hierarchical-output`
+
+### Goal
+Centralize all DGE operations (Local Inference, Cloud Orchestration, and Result Retrieval) into a single, automated dashboard.
+
+### Key Changes
+- `main.py`: Complete overhaul into the Unified Commander dashboard.
+- `pod_cleanup.py`: New utility for autonomous self-termination of RunPod instances.
+- `runpod_manager.py`: Added `RUNPOD_POD_ID` injection and auto-termination sequence.
+- "Sync Results": Integration of HuggingFace CLI to pull cloud checkpoints locally.
+- Inference Shell: Integrated GPT2-based live chat for testing emergent behavior on both local and synced models.
+
+### Workflow: The Closed Loop
+1. **Launch**: Launch experiments via the "Cloud Operations" menu in `main.py`.
+2. **Execute**: Pod runs experiments and uploads to HF.
+3. **Terminate**: Pod deletes itself via `pod_cleanup.py`.
+4. **Sync**: User pulls results via "Sync Results".
+5. **Insights**: User chats with the model in the "Inference Shell" to verify emergence.
+
+### Verification
+- Dashboard menu navigation verified.
+- Sync logic (HF CLI) integrated.
+- Self-termination sequence tested via simulated pod ID.
+
+### Next Steps
+1. Formalize "Forensic Analysis" module to automatically graph Grand Tour results.
+2. Implement "Layer-wise Plasticity Visualization" in the dashboard.
