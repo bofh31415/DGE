@@ -1,0 +1,130 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{tikz}
+% KORREKTUR: 'positioning' statt 'positional'
+\usetikzlibrary{fit, arrows.meta, positioning}
+
+\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=3cm}
+
+\usepackage{lineno}
+
+\begin{document}
+
+% --- BESCHREIBUNG ---
+\begin{center}
+    \Large\textbf{BESCHREIBUNG}\\[0.5cm]
+\end{center}
+
+\noindent\textbf{Bezeichnung:}\\
+Hardware-nahe Vorrichtung und Verfahren zur dynamischen Speicherpartitionierung und Modell-Transformation in adaptiven Systemen mittels kontextabhängiger Signalgatterung\\[1cm]
+
+\linenumbers 
+
+\section*{Technisches Gebiet}
+Die vorliegende Erfindung betrifft das Gebiet der adaptiven Signalverarbeitung und Hardware-nahen Steuerung von Speicherressourcen in Systemen der künstlichen Intelligenz, insbesondere für autoregressive Sprachmodelle (LLMs) und generative Diffusionsmodelle.
+
+\section*{Stand der Technik}
+Bisherige Systeme leiden beim Training unter „Katastrophalem Vergessen“. Bestehende Gatter-Mechanismen zur Steuerung des Signalflusses sind zudem rechenintensiv ($O(n \cdot k)$) und unflexibel gegenüber strukturellen Modell-Erweiterungen in Breite und Tiefe.
+
+\section*{Darstellung der Erfindung}
+Die Erfindung löst diese Probleme durch eine asymmetrische Gatter-Logik. Ein \textbf{Kontext-Detektor (10)} analysiert zeitliche Zustandsfolgen des Eingangssignals. Der Kontext-Detektor (10) ist in seiner Topologie nicht beschränkt und kann als einzelner Router, als mehrstufiges System oder als modular verschaltete, hierarchische Router-Architektur ausgeführt sein.
+
+Die Vorrichtung ermöglicht die Erweiterung adaptiver Systeme sowohl in der \textbf{Breite} als auch in der \textbf{Tiefe}. Die \textbf{Gatter-Logik (20)} gewährleistet dabei eine kontrollierte Integration neuer Parameter ohne Beeinflussung der Basiskonfiguration.
+
+Die Gatter-Steuerung nutzt eine rangreduzierte Broadcast-Addition ($g^{row} \oplus g^{col}$), was die Komplexität auf $O(n + k)$ reduziert. Eine integrierte \textbf{Rescue-Einheit (30)} verhindert das Einfrieren von Pfaden durch aktive Signalinjektion. Die Signale werden schließlich in spezifische \textbf{Speichersegmente (40)} geleitet, unterteilt in einen schreibgeschützten „Frozen Core“ und eine adaptive „Expansion Area“.
+
+\section*{Beschreibung der Zeichnungen}
+Fig. 1 zeigt die schematische Hardware-Architektur der Vorrichtung (10-40).\\
+Fig. 2 verdeutlicht das Prinzip der rangreduzierten Gatter-Berechnung innerhalb der Logik (20).
+
+% --- PATENTANSPRÜCHE ---
+\clearpage
+\nolinenumbers
+\begin{center}
+    \Large\textbf{PATENTANSPRÜCHE}\\[0.5cm]
+\end{center}
+
+\begin{enumerate}
+    \item Signalverarbeitungsvorrichtung zur Steuerung von Speicherzugriffen, umfassend einen Kontext-Detektor (10) zur Erzeugung eines Auswahlsignals basierend auf zeitlichen Zustandsfolgen und eine asymmetrische Gatter-Logik (20) zur selektiven Schreibsperre von Speichersegmenten (40).
+    
+    \item Vorrichtung nach Anspruch 1, dadurch gekennzeichnet, dass der Kontext-Detektor (10) eine mehrstufige, modular verschaltete oder hierarchische Router-Architektur zur kaskadierten Erzeugung von Auswahlsignalen umfasst.
+    
+    \item Vorrichtung nach Anspruch 1 oder 2, gekennzeichnet durch eine Broadcast-Recheneinheit innerhalb der Gatter-Logik (20) zur rangreduzierten Steuerung mittels Vektor-Addition.
+    
+    \item Vorrichtung nach einem der Ansprüche 1 bis 3, gekennzeichnet durch eine Rescue-Einheit (30) zur aktiven Pfadreaktivierung mittels Signalinjektion.
+    
+    \item Verfahren zur Modell-Transformation unter Verwendung einer Vorrichtung nach Anspruch 1, wobei Speichersegmente (40) so angesteuert werden, dass ein Modell in der Breite oder Tiefe durch eine Expansion Area erweitert wird, während die Basiskonfiguration als Frozen Core schreibgeschützt bleibt.
+\end{enumerate}
+
+% --- ZEICHNUNGEN ---
+\clearpage
+\begin{center}
+    \Large\textbf{ZEICHNUNGEN}\\[1cm]
+\end{center}
+
+\begin{figure}[h]
+    \centering
+    \textbf{Fig. 1}\\[0.5cm]
+    \begin{tikzpicture}[node distance=2.2cm, auto, >=stealth]
+        \node (input) [draw, rectangle, minimum width=3.5cm, minimum height=1cm] {Eingang ($x_t, x_{t-1}$)};
+        \node (detektor) [draw, rectangle, below=of input, minimum width=3.5cm, minimum height=1cm] {Kontext-Detektor (10)};
+        \node (logic) [draw, rectangle, below=of detektor, minimum width=3.5cm, minimum height=1cm] {Gatter-Logik (20)};
+        \node (rescue) [draw, circle, right=2.5cm of logic, inner sep=2pt] {Rescue (30)};
+        \node (memory) [draw, rectangle, below=of logic, minimum width=3.5cm, minimum height=1cm] {Speichersegmente (40)};
+        
+        \draw [->, thick] (input) -- (detektor);
+        \draw [->, thick] (detektor) -- (logic);
+        \draw [->, thick] (logic) -- (memory);
+        \draw [->, dashed, thick] (rescue) -- (logic) node[midway, above] {Injektion};
+    \end{tikzpicture}
+\end{figure}
+
+\vspace{1.5cm}
+
+\begin{figure}[h]
+    \centering
+    \textbf{Fig. 2}\\[0.5cm]
+    \begin{tikzpicture}[scale=1.0, >=stealth]
+        % Die Resultierende Matrix G
+        \draw[thick, fill=white] (0,0) rectangle (5,3.5);
+        \foreach \x in {1,2,3,4} \draw[gray!20] (\x,0) -- (\x,3.5);
+        \foreach \y in {0.7, 1.4, 2.1, 2.8} \draw[gray!20] (0,\y) -- (5,\y);
+        
+        % Beschriftung IN der Matrix
+        \node at (2.5, 2.0) {\textbf{Matrix $G$ (Zustände)}};
+        \node at (2.5, 1.4) {\footnotesize Komplexität: $O(n+k)$};
+
+        % Zeilen-Vektor oben (row) - bündig mit Matrixbreite
+        \draw[fill=gray!10, thick] (0, 4.0) rectangle (5, 4.7);
+        \node at (2.5, 4.35) {$g^{row} (n)$};
+
+        % Spalten-Vektor links (col) - bündig mit Matrixhöhe
+        \draw[fill=gray!10, thick] (-1.1, 0) rectangle (-0.4, 3.5);
+        \node[rotate=90] at (-0.75, 1.75) {$g^{col} (k)$};
+
+        % Plus-Symbol (Operator)
+        \node (plus) at (-0.75, 4.35) [circle, draw, thick, fill=white, inner sep=1pt] {\small $+$};
+        
+        % Hilfspfeile für die Broadcast-Operation
+        \draw[->, thick, shorten >=2pt] (-0.4, 4.35) -- (0, 4.35);
+        \draw[->, thick, shorten >=2pt] (-0.75, 4.0) -- (-0.75, 3.5);
+        
+        % Pfeil zur Logik-Einheit
+        \draw[->, ultra thick] (5.5, 1.75) -- (7.5, 1.75) node[right] {zu Logik (20)};
+    \end{tikzpicture}
+\end{figure}
+
+% --- ZUSAMMENFASSUNG ---
+\clearpage
+\begin{center}
+    \Large\textbf{ZUSAMMENFASSUNG}\\[0.5cm]
+\end{center}
+
+Die Erfindung betrifft eine hardware-nahe Vorrichtung zur effizienten Steuerung von Speicherressourcen. Ein Kontext-Detektor (10), der modular oder hierarchisch aufgebaut sein kann, erzeugt Auswahlsignale für eine asymmetrische Gatter-Logik (20). Diese nutzt rangreduzierte Berechnungen zur Ressourceneinsparung ($O(n+k)$). Die Vorrichtung ermöglicht die Erweiterung von Modellen in Breite und Tiefe ohne Informationsverlust in bestehenden Speichersegmenten (40). Eine Rescue-Einheit (30) schützt vor dem Einfrieren von Signalpfaden.
+
+\end{document}

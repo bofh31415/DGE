@@ -58,9 +58,11 @@ def generate_batch(task_type, vocab_size, batch_size, seq_len):
     
     return x, y
 
+from model_manager import ModelManager
+
 def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_len=32, 
                logger=None, start_step=0, checkpoint_fn=None, optimizer=None, probe_task_type=None,
-               sparsity_lambda=0.05, **kwargs):
+               sparsity_lambda=0.05, model_manager=None, family_name=None, task_name=None, **kwargs):
     print(f"\n--- Starting Training: {task_type.name} ({steps} steps) ---")
     
     # Device handling - move model to GPU if available
@@ -69,17 +71,17 @@ def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_
     
     # MULTI-GPU SUPPORT
     if torch.cuda.device_count() > 1:
-        print(f"🚀 Using {torch.cuda.device_count()} GPUs for training!")
+        print(f"[Multi-GPU] Using {torch.cuda.device_count()} GPUs for training!")
         model = torch.nn.DataParallel(model)
         
-    print(f"🖥️ Training on: {device}" + (f" ({torch.cuda.get_device_name(0)})" if device.type == 'cuda' else ""))
+    print(f"Training on: {device}" + (f" ({torch.cuda.get_device_name(0)})" if device.type == 'cuda' else ""))
     
     # Reference to base model attributes (unwrap DP if needed)
     raw_model = model.module if isinstance(model, torch.nn.DataParallel) else model
     
     if optimizer is None:
         optimizer = optim.AdamW(model.parameters(), lr=1e-3)
-        print("⚠️ Warning: Using default AdamW instead of passed optimizer.")
+        print("Warning: Using default AdamW instead of passed optimizer.")
         
     model.train()
     start_time = time.time()
@@ -406,41 +408,73 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
         }
         logger.log_event("TRAINED_DATASET", summary, step=current_step)
     
-    # Final checkpoint
-    if checkpoint_fn:
-        print(f"[Checkpoint] Saving final state at step {current_step}...")
-        checkpoint_fn(current_step)
-    
-    return current_step + 1
+    # Final Checkpoint
+    if model_manager and family_name:
+        raw_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+        metrics = {
+            "final_loss": final_avg_loss,
+            "steps": total_steps_trained,
+            "task": task_name,
+            "replay_ratio": replay_ratio,
+            "hyperparams": kwargs
+        }
+        
+        # Determine stage name
+        # If continuing, we need a unique name.
+        safe_task_name = task_name.replace(" ", "_")
+        stage_name = f"{safe_task_name}_{start_step + total_steps_trained}"
+        if kwargs.get('stage_suffix'):
+            stage_name += f"_{kwargs['stage_suffix']}"
+            
+        stage_path = model_manager.save_stage(
+            model=raw_model,
+            family_name=family_name,
+            stage_name=stage_name,
+            config=kwargs.get('config', {}),
+            metrics=metrics,
+            parent_stage=kwargs.get('parent_stage')
+        )
+        print(f"✅ Final model saved to {stage_path}")
+    elif checkpoint_fn:
+        # Legacy fallback
+        raw_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+        checkpoint_fn(raw_model, current_step)
+        
+    print(f"--- Training Complete ({time.time() - start_time:.2f}s) ---")
+    return model, current_step
 
 
-def evaluate_task(model, task_type, vocab_size=1000, samples=100, seq_len=32):
+def evaluate_task(model, task_type, vocab_size=1000, steps=100, batch_size=32, seq_len=32, device=None):
     """
-    Evaluates accuracy on the specified task.
+    Evaluates the model on the specified task.
     """
-    # Get device from model
-    device = next(model.parameters()).device
-    
+    if device is None:
+        device = DEVICE
+        
     model.eval()
+    model = model.to(device)
+    total_loss = 0
     correct = 0
-    total_tokens = 0
+    total = 0
+    
+    criterion = torch.nn.CrossEntropyLoss()
     
     with torch.no_grad():
-        # Generate one large batch or multiple small ones
-        # Use single batch for simplicity of 'samples'
-        x, y = generate_batch(task_type, vocab_size, samples, seq_len)
-        x, y = x.to(device), y.to(device)
-        
-        logits, _ = model(x)
-        preds = logits.argmax(dim=-1)
-        
-        # Check all tokens? Or just the next prediction logic?
-        # Standard accuracy: compare pred match with y
-        matches = (preds == y)
-        correct = matches.sum().item()
-        total_tokens = matches.numel()
-        
-    acc = correct / total_tokens * 100.0
-    model.train()
-    return acc
-
+        for _ in range(steps):
+            x, y = generate_batch(task_type, vocab_size, batch_size, seq_len)
+            x, y = x.to(device), y.to(device)
+            
+            logits, _ = model(x)
+            loss = criterion(logits.view(-1, logits.size(-1)), y.view(-1))
+            total_loss += loss.item()
+            
+            # Accuracy
+            predictions = torch.argmax(logits, dim=-1)
+            correct += (predictions == y).sum().item()
+            total += y.numel()
+            
+    avg_loss = total_loss / steps
+    accuracy = correct / total
+    
+    print(f"📊 Eval {task_type.name}: Loss {avg_loss:.4f}, Accuracy {accuracy:.4f}")
+    return avg_loss, accuracy

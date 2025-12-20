@@ -212,7 +212,15 @@ class DGEAdamW(torch.optim.AdamW):
                 else:
                     denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
                 
-                p.addcdiv_(exp_avg, denom, value=-step_size)
+                # CRITICAL FIX: Apply dge_mask to the UPDATE ITSELF, not just weight decay
+                # This ensures frozen parameters are never modified
+                if hasattr(p, 'dge_mask'):
+                    # Compute update: -step_size * exp_avg / denom
+                    update = -step_size * exp_avg / denom
+                    # Mask the update: only apply to active (mask=1) parts
+                    p.add_(update * p.dge_mask)
+                else:
+                    p.addcdiv_(exp_avg, denom, value=-step_size)
 
         return loss
 class Quadrant(Enum):
@@ -631,22 +639,55 @@ class MoEGatedLinear(nn.Module):
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             nn.init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, base_only: bool = False, synergy_mode: str = 'gated') -> torch.Tensor:
         # V 0.2.6: Fixed Forward Logic
+        # V 0.12.0: Added synergy_mode for additive output
+        
         # 1. Col Gate (Input Selection)
         if self.gate_col is not None:
-             g_col = self.gate_col(input)
-             x_in = input * g_col
+             # V 0.12.0: Additive mode skips input gating too
+             if synergy_mode == 'additive':
+                 x_in = input  # No gating, all inputs contribute
+             else:
+                 g_col = self.gate_col(input)
+                 
+                 # V 0.10.0: Base Only Override for Inputs
+                 if base_only:
+                     if hasattr(self.gate_col, 'old_count') and self.gate_col.old_count > 0:
+                         old_c = self.gate_col.old_count
+                         if g_col.shape[-1] > old_c:
+                             mask = torch.zeros_like(g_col)
+                             mask[..., :old_c] = 1.0
+                             g_col = g_col * mask
+
+                 x_in = input * g_col
         else:
              x_in = input
+             pass
              
         # 2. Linear
         out = F.linear(x_in, self.weight, self.bias)
         
         # 3. Row Gate (Output Selection)
         if self.gate_row is not None:
-             g_row = self.gate_row(input) # Router sees Raw Input!
-             out = out * g_row
+             # V 0.12.0: Additive mode skips row gating (sum all contributions)
+             if synergy_mode == 'additive':
+                 # In additive mode, all skill outputs contribute equally (no gating)
+                 pass  # Skip gating multiplication
+             else:
+                 # Gated mode (default): Apply router-based gating
+                 g_row = self.gate_row(input) # Router sees Raw Input!
+                 
+                 # V 0.10.0: Base Only Override for Outputs
+                 if base_only:
+                     if hasattr(self.gate_row, 'old_count') and self.gate_row.old_count > 0:
+                         old_c = self.gate_row.old_count
+                         if g_row.shape[-1] > old_c:
+                             mask = torch.zeros_like(g_row)
+                             mask[..., :old_c] = 1.0
+                             g_row = g_row * mask
+                 
+                 out = out * g_row
              
         return out
     
@@ -969,6 +1010,27 @@ def expand_dge_linear(
 
         
     new_layer.register_buffer('backward_mask', mask)
+    
+    # CRITICAL FIX for DGEAdamW:
+    # We must attach the mask to the parameter itself via 'dge_mask' attribute
+    # so that the optimizer knows not to decay frozen weights.
+    new_layer.weight.dge_mask = mask
+    
+    # Handle Bias Mask
+    if new_layer.bias is not None:
+        # Create 1D bias mask
+        # We assume bias expands with OUT_FEATURES.
+        # old_out = frozen, added_out = active.
+        # But wait, expansion logic depends on where new outputs are.
+        # If frozen_core_pos == TOP_LEFT:
+        #   Old out is [0:old_out]
+        #   New out is [old_out:]
+        # So mask should be 0 for old, 1 for new.
+        bias_mask = torch.ones(new_out).to(mask.device)
+        bias_mask[:old_out] = 0.0
+        
+        new_layer.register_buffer('frozen_bias_mask', bias_mask)
+        new_layer.bias.dge_mask = bias_mask
     
     def hook_fn(grad):
         return grad * new_layer.backward_mask

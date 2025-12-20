@@ -410,6 +410,93 @@ class TextDataset(Dataset):
         return x, y
 
 
+
+class IDKDataset(TextDataset):
+    """
+    Dataset that sets the target for ALL tokens to a specific IDK token.
+    Used to train the model to output [IDK] when encountering OOD data.
+    """
+    def __init__(self, texts, tokenizer, seq_len=128, vocab_size=None, idk_token_id=None):
+        super().__init__(texts, tokenizer, seq_len, vocab_size)
+        if idk_token_id is None:
+            raise ValueError("idk_token_id must be provided for IDKDataset")
+        self.idk_token_id = idk_token_id
+        
+    def __getitem__(self, idx):
+        # Get normal input/target pair from parent
+        x, _ = super().__getitem__(idx)
+        
+        # Override target y with purely IDK tokens
+        # We want the model to predict IDK at every step given OOD input
+        y = torch.full_like(x, self.idk_token_id)
+        
+        return x, y
+
+
+def load_idk_dataset(dataset_name="wikitext", split='train', max_samples=None, 
+                     seq_len=128, batch_size=32, tokenizer_name='gpt2', 
+                     vocab_size=None, idk_token_id=None, shuffle=True):
+    """
+    Load a dataset and treat it as IDK training data (Targets = IDK Token).
+    Default uses wikitext-2 as generic OOD data.
+    """
+    if not HF_AVAILABLE:
+        raise ImportError("HuggingFace datasets required for default IDK data.")
+        
+    print(f"🛑 Loading IDK Dataset using {dataset_name} ({split})...")
+    
+    # Load raw dataset based on name
+    if dataset_name == "wikitext":
+        dataset = load_dataset("wikitext", "wikitext-2-v1", split=split)
+        text_field = "text"
+    elif dataset_name == "tinystories":
+        dataset = load_dataset("roneneldan/TinyStories", split=split)
+        text_field = "text"
+    elif dataset_name == "c4":
+        dataset = load_dataset("c4", "en", split=split, streaming=True) # C4 is huge
+        # We need to take max_samples immediately if streaming
+        dataset = dataset.take(max_samples) if max_samples else dataset.take(1000)
+        text_field = "text"
+    else:
+        # Fallback generic load
+        dataset = load_dataset(dataset_name, split=split)
+        text_field = "text"
+
+    if max_samples and dataset_name != "c4": # C4 handled above
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+
+    # Tokenizer
+    if TOKENIZER_AVAILABLE and tokenizer_name:
+        print(f"🔤 Loading tokenizer: {tokenizer_name}")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    else:
+        tokenizer = None
+        print("⚠️ Using fallback character-level tokenization")
+
+    # Extract texts
+    texts = []
+    for item in dataset:
+        txt = item.get(text_field, "")
+        if len(txt) > 50: # Filter empty/short lines common in wikitext
+            texts.append(txt)
+
+    # Create IDK Dataset
+    torch_dataset = IDKDataset(texts, tokenizer, seq_len, vocab_size, idk_token_id=idk_token_id)
+    
+    dataloader = DataLoader(
+        torch_dataset, 
+        batch_size=batch_size, 
+        shuffle=shuffle,
+        num_workers=0,
+        pin_memory=True
+    )
+    
+    print(f"✅ Loaded {len(torch_dataset)} IDK samples from {dataset_name}")
+    return dataloader
+
+
 def load_tinystories(split='train', max_samples=None, seq_len=128, batch_size=32, 
                      tokenizer_name='gpt2', vocab_size=None, shuffle=True):
     """

@@ -26,8 +26,11 @@ class DGEBlock(nn.Module):
         self.ln2 = nn.LayerNorm(d_model)
         self.act = nn.GELU()
 
-    def forward(self, x):
+
+
+    def forward(self, x, base_only=False, synergy_mode='gated'):
         # x: [batch, seq, d_model]
+        # V 0.12.0: Added synergy_mode propagation
         
         # Attn
         resid = x
@@ -35,10 +38,9 @@ class DGEBlock(nn.Module):
         B, T, C = x.size()
         
         # QKV
-        # V12: Separate Forward
-        q = self.w_q(x)
-        k = self.w_k(x)
-        v = self.w_v(x)
+        q = self.w_q(x, base_only=base_only, synergy_mode=synergy_mode)
+        k = self.w_k(x, base_only=base_only, synergy_mode=synergy_mode)
+        v = self.w_v(x, base_only=base_only, synergy_mode=synergy_mode)
         
         # Reshape for multi-head attention
         # [B, T, n_head, head_dim] -> [B, n_head, T, head_dim]
@@ -52,15 +54,15 @@ class DGEBlock(nn.Module):
         y = att @ v # [B, n_head, T, head_dim]
         
         y = y.transpose(1, 2).contiguous().view(B, T, C)
-        y = self.w_o(y)
+        y = self.w_o(y, base_only=base_only, synergy_mode=synergy_mode)
         x = resid + y
         
         # MLP
         resid = x
         x = self.ln2(x)
-        x = self.w_mlp_in(x)
+        x = self.w_mlp_in(x, base_only=base_only, synergy_mode=synergy_mode)
         x = self.act(x)
-        x = self.w_mlp_out(x)
+        x = self.w_mlp_out(x, base_only=base_only, synergy_mode=synergy_mode)
         x = resid + x
         
         return x
@@ -88,12 +90,14 @@ class DGEBlock(nn.Module):
         self.ln2 = expand_layer_norm(self.ln2, added_width)
 
 class DGESimpleTransformer(nn.Module):
-    def __init__(self, vocab_size=1000, d_model=64, n_layer=2, n_head=4, max_seq_len=1024, initial_gating=False, router_type='bigram'):
+    def __init__(self, vocab_size=1000, d_model=64, n_layer=2, n_head=4, max_seq_len=1024, initial_gating=False, router_type='bigram', synergy_mode='gated'):
         super().__init__()
         self.d_model = d_model
+        self.vocab_size = vocab_size
         self.max_seq_len = max_seq_len
         self.initial_gating = initial_gating  # V 0.9.3: Store state
         self.router_type = router_type
+        self.synergy_mode = synergy_mode  # V 0.12.0: 'gated' or 'additive'
 
         self.token_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Parameter(torch.zeros(1, max_seq_len, d_model))
@@ -102,17 +106,50 @@ class DGESimpleTransformer(nn.Module):
         # Initialize Base Head with Gating if requested
         self.lm_head = MoEGatedLinear(d_model, vocab_size, bias=False, initial_gating=initial_gating, router_type=router_type)
         
-    def forward(self, idx, targets=None, sparsity_lambda=0.05):
+    def forward(self, idx, targets=None, sparsity_lambda=0.05, base_only=False):
         B, T = idx.size()
         
         tok_emb = self.token_emb(idx)
         pos_emb = self.pos_emb[:, :T, :] # Broadcasting handled
         x = tok_emb + pos_emb
         
+        # Base Only Mode (Router 0 Only)
+        # Sets a thread-local or global context, OR passes flags down?
+        # DGEBlock doesn't take 'base_only' arg in forward.
+        # But DGEBlock calls self.w_q(x), which is MoEGatedLinear.
+        # MoEGatedLinear needs to know to use only Index 0.
+        # We can implement this by temporarily monkey-patching the Gate's behavior 
+        # OR better: Add a context manager or attribute to the model that layers check.
+        # Let's use a temporary attribute on the model that gates can check if they have reference?
+        # No, gates don't have ref to model.
+        # 
+        # Alternative: We pass `base_only=base_only` to layers.
+        # But nn.Sequential / ModuleList makes standard calls `layer(x)`.
+        # We need to loop.
+        
         for layer in self.layers:
-            x = layer(x)
+            # We need to hack this slightly or update DGEBlock.forward signature.
+            # Let's assume we can update DGEBlock.forward to accept **kwargs or explicit arg.
+            # But wait, MoEGatedLinear needs the signal.
+            # DGEBlock calls `self.w_q(x)`.
+            # 
+            # Solution: We set a flag on the module before forward and unset after?
+            # A Context Manager approach on the model is cleaner but implementation heavy.
+            # 
+            # Simple approach: If base_only is True, we zero out the input to expansion experts?
+            # Or force routers to output [1.0, 0.0, ...]
+            # 
+            # The cleanest structure-compliant way is:
+            # Pass `base_only` to layer.forward().
+            # Update DGEBlock.forward() to accept `base_only`.
+            # Update DGEBlock to pass `base_only` to MoEGatedLinear.forward().
+            # Update MoEGatedLinear.forward() to accept `base_only`.
+            # 
+            # This requires updating 3 classes.
+            # Let's do it for robustness.
+            x = layer(x, base_only=base_only, synergy_mode=self.synergy_mode)
             
-        logits = self.lm_head(x)
+        logits = self.lm_head(x, base_only=base_only, synergy_mode=self.synergy_mode)
         
         loss = None
         if targets is not None:
@@ -212,6 +249,108 @@ class DGESimpleTransformer(nn.Module):
         
         self.d_model = new_input_dim # Update d_model to the new value
         print("Expansion Complete.")
+
+    # =========================================================================
+    # SKILL MANAGEMENT API (V 0.9.6: Router0 Always IDK Architecture)
+    # =========================================================================
+    
+    def expand_for_skill(self, skill_name: str, expansion_delta: int = 64, router_type: str = 'rbf') -> int:
+        """
+        Add capacity for a new skill via expansion.
+        
+        In the "Router0 Always IDK" architecture:
+        - Base model starts with frozen router0 (outputs ~0 = IDK)
+        - Each skill adds its own router + capacity
+        - After training, freeze the skill's router to lock it
+        - Returns: skill_id
+        """
+        # Initialize registry
+        if not hasattr(self, '_skill_registry'):
+            self._skill_registry = {}
+            self._skill_counter = 0
+
+        # Skill ID
+        skill_id = self._skill_counter
+        self._skill_counter += 1
+        
+        # Capture pre-expansion params
+        old_d_model = self.d_model
+        # Use simple ID set tracking
+        pre_params = set(id(p) for p in self.parameters())
+        
+        # Expand
+        new_d_model = self.d_model + expansion_delta
+        print(f"\n🎯 Expanding for Skill '{skill_name}' (ID: {skill_id})")
+        self.expand_model(
+            new_input_dim=new_d_model,
+            new_output_dim=new_d_model, # Assuming symmetric vocab for now
+            router_type=router_type,
+            router_init_bias=0.0, # Open by default
+            cross_term_policy='full'
+        )
+        
+        # Capture new params
+        post_params = set(id(p) for p in self.parameters())
+        new_params = post_params - pre_params
+        
+        self._skill_registry[skill_id] = {
+            'name': skill_name,
+            'old_d_model': old_d_model,
+            'new_d_model': new_d_model,
+            'router_type': router_type,
+            'frozen': False,
+            'params': new_params
+        }
+        
+        print(f"   Skill '{skill_name}' registered with ID {skill_id} ({len(new_params)} new params)")
+        return skill_id
+        
+    def freeze_skill(self, skill_id: int):
+        """
+        Freeze a skill's parameters (routers + weights) to prevent forgetting.
+        
+        V 0.12.0: Now freezes BOTH router AND weight regions.
+        Weight regions are frozen via gradient masking (dge_mask).
+        """
+        if not hasattr(self, '_skill_registry') or skill_id not in self._skill_registry:
+            raise ValueError(f"Skill ID {skill_id} not found.")
+            
+        skill = self._skill_registry[skill_id]
+        if skill['frozen']:
+            print(f"Warning: Skill {skill_id} already frozen.")
+            return
+
+        # 1. Freeze router/gate parameters (by param ID)
+        router_count = 0
+        for p in self.parameters():
+            if id(p) in skill['params']:
+                p.requires_grad = False
+                router_count += 1
+        
+        # 2. Freeze weight regions via gradient masking
+        # The skill owns columns [old_d_model : new_d_model]
+        old_d = skill['old_d_model']
+        new_d = skill['new_d_model']
+        
+        weight_count = 0
+        for module in self.modules():
+            if isinstance(module, MoEGatedLinear):
+                # Get or create dge_mask for this weight
+                if not hasattr(module.weight, 'dge_mask'):
+                    # Initialize mask to all 1s (all trainable)
+                    module.weight.dge_mask = torch.ones_like(module.weight)
+                
+                # Freeze skill's input columns (affects input dimension)
+                # Weight shape: [out_features, in_features]
+                # Skill's columns: [:, old_d : new_d]
+                in_features = module.weight.shape[1]
+                if in_features >= new_d:
+                    # Freeze columns corresponding to this skill
+                    module.weight.dge_mask[:, old_d:new_d] = 0.0
+                    weight_count += module.weight[:, old_d:new_d].numel()
+                    
+        skill['frozen'] = True
+        print(f"Skill '{skill['name']}' (ID: {skill_id}) frozen: {router_count} router params, {weight_count} weight elements masked.")
 
     # =========================================================================
     # SKILL MANAGEMENT API (V 0.9.6: Router0 Always IDK Architecture)
