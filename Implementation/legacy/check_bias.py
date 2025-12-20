@@ -1,5 +1,5 @@
 
-from dge_model import DGESimpleTransformer
+from core.model import DGESimpleTransformer
 import torch
 
 def check_bias():

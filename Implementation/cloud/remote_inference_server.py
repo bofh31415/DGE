@@ -3,8 +3,8 @@ import os
 import torch
 import torch.nn.functional as F
 from flask import Flask, request, jsonify
-from dge_model import DGESimpleTransformer
-from model_manager import ModelManager
+from core.model import DGESimpleTransformer
+from utils.model_manager import ModelManager
 from transformers import GPT2Tokenizer
 import threading
 

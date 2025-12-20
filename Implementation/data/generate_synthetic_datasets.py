@@ -1,6 +1,6 @@
 import os
 import random
-from data import import_text_file
+from data.loader import import_text_file
 
 def generate_count_up(num_samples=1000, max_val=50):
     lines = []

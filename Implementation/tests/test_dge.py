@@ -19,7 +19,7 @@ import os
 # Add parent directory to path to import implementation modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from dge_utils import expand_dge_linear, expand_layer_norm, expand_embedding, MoEGatedLinear, HybridGate
+from core.utils import expand_dge_linear, expand_layer_norm, expand_embedding, MoEGatedLinear, HybridGate
 from version import __version__
 
 # Test version constant - update when tests change
@@ -370,7 +370,7 @@ class TestDirectedSynergy(unittest.TestCase):
         
     def test_quadrant_init_config_defaults(self):
         """Verify QuadrantInitConfig has correct default values."""
-        from dge_utils import QuadrantInitConfig
+        from core.utils import QuadrantInitConfig
         
         config = QuadrantInitConfig()
         
@@ -392,7 +392,7 @@ class TestDirectedSynergy(unittest.TestCase):
         
     def test_experience_replay_penalty(self):
         """Test ExperienceReplayPenalty stores reference and computes penalty."""
-        from dge_utils import ExperienceReplayPenalty
+        from core.utils import ExperienceReplayPenalty
         
         old_dim = 10
         penalty = ExperienceReplayPenalty(old_out_dim=old_dim, penalty_weight=0.5)

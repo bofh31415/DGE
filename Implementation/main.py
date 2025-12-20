@@ -3,8 +3,8 @@ import os
 import sys
 import torch
 import torch.nn.functional as F
-from model_manager import ModelManager, Diary
-from dge_model import DGESimpleTransformer
+from utils.model_manager import ModelManager, Diary
+from core.model import DGESimpleTransformer
 import time
 import json
 import subprocess
@@ -148,7 +148,7 @@ class DGEDashboard:
 
     # --- CLOUD OPERATIONS ---
     def cloud_ops_ui(self):
-        import runpod_manager
+        import cloud.runpod_manager as runpod_manager
         while True:
             self.clear_screen()
             print(TITLE)
@@ -180,7 +180,7 @@ class DGEDashboard:
                 self.deploy_ui()
 
     def remote_chat_ui(self):
-        import runpod_manager
+        import cloud.runpod_manager as runpod_manager
         self.clear_screen()
         print(TITLE)
         print("--- REMOTE LIVE CHAT ---")
@@ -275,7 +275,7 @@ class DGEDashboard:
                 print(f"❌ Communication Error: {e}")
                 
     def deploy_ui(self):
-        import runpod_manager
+        import cloud.runpod_manager as runpod_manager
         self.clear_screen()
         print("🚀 DEPLOY TO CLOUD")
         print("Common Tasks:")
@@ -318,7 +318,7 @@ class DGEDashboard:
         print("This will deploy the 4-stage systematic suite to RunPod.")
         confirm = input("Confirm Deployment? (y/n): ").strip().lower()
         if confirm == 'y':
-            import runpod_manager
+            import cloud.runpod_manager as runpod_manager
             runpod_manager.deploy_experiment("python run_dge_grand_tour.py")
             print("\n✅ Grand Tour is running in the cloud. Check 'Cloud Ops' for status.")
         input("\nPress Enter to return...")

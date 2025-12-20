@@ -3,9 +3,9 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import data
-import dge_model
-from dge_utils import expand_embedding, expand_dge_linear, DGEAdamW
+import data.loader as data
+import core.model as dge_model
+from core.utils import expand_embedding, expand_dge_linear, DGEAdamW
 import numpy as np
 
 # Configuration - TUNED FOR 95%+ IDK RATE

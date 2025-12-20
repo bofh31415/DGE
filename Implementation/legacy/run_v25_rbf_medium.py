@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dge_model import DGESimpleTransformer
-from dge_utils import set_seed, Quadrant, DGEAdamW
-from dge_training import TaskType
+from core.model import DGESimpleTransformer
+from core.utils import set_seed, Quadrant, DGEAdamW
+from core.training import TaskType
 import os
 import datetime
 import math

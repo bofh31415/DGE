@@ -56,32 +56,32 @@ print("\n📦 TEST 1: Module Imports")
 print("-" * 40)
 
 try:
-    from dge_model import DGESimpleTransformer
+    from core.model import DGESimpleTransformer
     test("Import DGESimpleTransformer", True)
 except Exception as e:
     test("Import DGESimpleTransformer", False, str(e))
 
 try:
-    from dge_training import train_dataset, DEVICE
+    from core.training import train_dataset, DEVICE
     test("Import train_dataset", True)
     test(f"DEVICE detected: {DEVICE}", True, str(DEVICE))
 except Exception as e:
-    test("Import dge_training", False, str(e))
+    test("import core.training as dge_training", False, str(e))
 
 try:
-    from replay_buffer import ReplayBuffer
+    from data.replay_buffer import ReplayBuffer
     test("Import ReplayBuffer", True)
 except Exception as e:
     test("Import ReplayBuffer", False, str(e))
 
 try:
-    from data import load_tinystories, load_gsm8k, TextDataset
+    from data.loader import load_tinystories, load_gsm8k, TextDataset
     test("Import data loaders", True)
 except Exception as e:
     test("Import data loaders", False, str(e))
 
 try:
-    from dge_logger import DGELogger
+    from utils.logger import DGELogger
     test("Import DGELogger", True)
 except Exception as e:
     test("Import DGELogger", False, str(e))

@@ -1,8 +1,8 @@
 import os
 import torch
 import torch.nn as nn
-from dge_model import DGESimpleTransformer
-from dge_utils import MoEGatedLinear, DGEAdamW
+from core.model import DGESimpleTransformer
+from core.utils import MoEGatedLinear, DGEAdamW
 
 def run_v14_optimizer_sanity():
     print(f"\n" + "="*60)

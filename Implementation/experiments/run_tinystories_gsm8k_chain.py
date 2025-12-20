@@ -30,13 +30,13 @@ from datetime import datetime
 # Add implementation directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from dge_model import DGESimpleTransformer
-from dge_training import train_dataset, DEVICE
-from dge_logger import DGELogger
-from replay_buffer import ReplayBuffer
-from data import load_tinystories, load_gsm8k
+from core.model import DGESimpleTransformer
+from core.training import train_dataset, DEVICE
+from utils.logger import DGELogger
+from data.replay_buffer import ReplayBuffer
+from data.loader import load_tinystories, load_gsm8k
 from version import __version__
-from hf_utils import download_foundation_model
+from hf.utils import download_foundation_model
 
 # Windows console-safe print (handles Unicode emojis)
 def safe_print(msg):
@@ -130,7 +130,7 @@ CONFIG = {
 }
 
 # HuggingFace Hub configuration - Now uses unified repo structure
-from hf_repo_manager import HFRepoManager, wait_for_uploads
+from hf.repo_manager import HFRepoManager, wait_for_uploads
 HF_MANAGER = HFRepoManager("tinystories_gsm8k")
 HF_REPO = "darealSven/dge"  # Unified repo
 
@@ -874,7 +874,7 @@ def run_experiment():
         
         # FALLBACK: Check local restorepoint
         if not skip_tinystories_training:
-            from hf_utils import check_for_tinystories_restorepoint
+            from hf.utils import check_for_tinystories_restorepoint
             restorepoint_path = check_for_tinystories_restorepoint(CONFIG["output_dir"], ensure_checkpoint_restored)
             if restorepoint_path:
                 print(f"   🔄 Using TinyStories restorepoint: {restorepoint_path}")

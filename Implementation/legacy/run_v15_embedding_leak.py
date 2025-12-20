@@ -1,8 +1,8 @@
 import os
 import torch
 import torch.nn as nn
-from dge_model import DGESimpleTransformer
-from dge_utils import DGEAdamW
+from core.model import DGESimpleTransformer
+from core.utils import DGEAdamW
 
 def run_v15_embedding_leak():
     print(f"\n" + "="*60)

@@ -4,10 +4,10 @@ import shutil
 import torch
 import tempfile
 import unittest
-from dge_model import DGESimpleTransformer
-from dge_training import train_dataset
-from replay_buffer import ReplayBuffer
-import data
+from core.model import DGESimpleTransformer
+from core.training import train_dataset
+from data.replay_buffer import ReplayBuffer
+import data.loader as data
 from torch.utils.data import DataLoader
 
 
@@ -26,7 +26,7 @@ def test_end_to_end_training():
             # Write enough text for a few chunks
             f.write("Alice went to the store to buy some apples. " * 100)
 
-        # 1. Import Data
+        # 1. import data.loader as data
         print("Importing data...")
         dataset_path = data.import_text_file(text_file, local_name="test_dataset", chunk_size=50)
         

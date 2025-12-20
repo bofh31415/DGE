@@ -25,10 +25,10 @@ import shutil
 from datetime import datetime
 from transformers import AutoTokenizer
 
-from dge_model import DGESimpleTransformer
-from dge_logger import DGELogger
+from core.model import DGESimpleTransformer
+from utils.logger import DGELogger
 from vocab_expansion import GatedVocabExpander
-from data import load_tinystories
+from data.loader import load_tinystories
 
 # ============================================================================
 # CONFIGURATION
@@ -87,7 +87,7 @@ CONFIG = {
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Use unified HF repo manager
-from hf_repo_manager import HFRepoManager, wait_for_uploads
+from hf.repo_manager import HFRepoManager, wait_for_uploads
 HF_MANAGER = HFRepoManager("vocab_expansion")
 HF_REPO = "darealSven/dge"
 

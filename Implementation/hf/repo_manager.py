@@ -13,7 +13,7 @@ Structure:
     │   └── experiment_results.json
 
 Usage:
-    from hf_repo_manager import HFRepoManager
+    from hf.repo_manager import HFRepoManager
     
     manager = HFRepoManager("tinystories_gsm8k")
     manager.upload_checkpoint("models/exp/checkpoint", step=1000, is_milestone=True)

@@ -8,9 +8,9 @@ import json
 # Add parent directory to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from dge_model import DGESimpleTransformer
-from dge_utils import Quadrant
-from dge_training import TaskType, generate_batch
+from core.model import DGESimpleTransformer
+from core.utils import Quadrant
+from core.training import TaskType, generate_batch
 from main import DGELab
 
 class TestDGEModel(unittest.TestCase):

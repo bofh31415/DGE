@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 # Add parent dir to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data import load_german_tinystories, load_mgsm, HF_AVAILABLE
-from dge_training import train_task, TaskType
-from dge_model import DGESimpleTransformer
+from data.loader import load_german_tinystories, load_mgsm, HF_AVAILABLE
+from core.training import train_task, TaskType
+from core.model import DGESimpleTransformer
 
 class TestV09Integration(unittest.TestCase):
     

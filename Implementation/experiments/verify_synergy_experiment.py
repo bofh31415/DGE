@@ -22,8 +22,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-import dge_model
-from dge_utils import expand_dge_linear, DGEAdamW
+import core.model as dge_model
+from core.utils import expand_dge_linear, DGEAdamW
 
 # Configuration
 CONFIG = {

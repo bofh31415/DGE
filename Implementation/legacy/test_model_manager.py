@@ -1,7 +1,7 @@
 import torch
 import os
 import shutil
-from model_manager import ModelManager, Diary
+from utils.model_manager import ModelManager, Diary
 
 def test_manager():
     print("Testing ModelManager...")

@@ -14,7 +14,7 @@ Flow:
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from dge_model import DGESimpleTransformer
+from core.model import DGESimpleTransformer
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

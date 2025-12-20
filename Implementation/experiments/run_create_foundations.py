@@ -23,10 +23,10 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from dge_model import DGESimpleTransformer
-from dge_training import train_dataset, DEVICE
-from dge_logger import DGELogger
-from data import load_tinystories, load_gsm8k, load_german_tinystories
+from core.model import DGESimpleTransformer
+from core.training import train_dataset, DEVICE
+from utils.logger import DGELogger
+from data.loader import load_tinystories, load_gsm8k, load_german_tinystories
 try:
     from huggingface_hub import HfApi, list_repo_files
     HF_Hub = True

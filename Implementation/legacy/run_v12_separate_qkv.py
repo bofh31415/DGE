@@ -1,10 +1,10 @@
 import os
 import torch
 from datetime import datetime
-from dge_model import DGESimpleTransformer
-from dge_training import train_task, TaskType
-from dge_utils import DGEAdamW
-from dge_logger import DGELogger
+from core.model import DGESimpleTransformer
+from core.training import train_task, TaskType
+from core.utils import DGEAdamW
+from utils.logger import DGELogger
 
 def run_v12_separate_qkv():
     print(f"\n" + "="*60)

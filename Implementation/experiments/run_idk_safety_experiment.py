@@ -25,7 +25,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from dge_model import DGESimpleTransformer
+from core.model import DGESimpleTransformer
 from idk_router import IDKRouter, ConfidenceAggregator, create_idk_router
 from version import __version__
 

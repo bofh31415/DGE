@@ -16,9 +16,9 @@ import torch
 import torch.nn as nn
 import math
 from datetime import datetime
-from dge_model import DGESimpleTransformer
-from dge_training import TaskType, generate_batch, evaluate_task
-from dge_utils import DGEAdamW, MoEGatedLinear, HybridGate
+from core.model import DGESimpleTransformer
+from core.training import TaskType, generate_batch, evaluate_task
+from core.utils import DGEAdamW, MoEGatedLinear, HybridGate
 
 
 def collect_gate_stats(model):

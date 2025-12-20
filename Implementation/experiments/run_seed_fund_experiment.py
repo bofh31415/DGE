@@ -19,10 +19,10 @@ import os
 import torch
 import math
 from datetime import datetime
-from dge_model import DGESimpleTransformer
-from dge_training import train_task, TaskType, generate_batch, evaluate_task
-from dge_utils import DGEAdamW, ExperienceReplayPenalty
-from dge_logger import DGELogger
+from core.model import DGESimpleTransformer
+from core.training import train_task, TaskType, generate_batch, evaluate_task
+from core.utils import DGEAdamW, ExperienceReplayPenalty
+from utils.logger import DGELogger
 
 
 def compute_perplexity(model, task_type, vocab_size, batch_size=32, seq_len=32, samples=10):

@@ -28,11 +28,11 @@ from datetime import datetime
 # Add implementation directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from dge_model import DGESimpleTransformer
-from dge_training import train_dataset, DEVICE
-from dge_logger import DGELogger
-from replay_buffer import ReplayBuffer
-from data import load_tinystories, load_gsm8k, load_local_dataset, load_mgsm
+from core.model import DGESimpleTransformer
+from core.training import train_dataset, DEVICE
+from utils.logger import DGELogger
+from data.replay_buffer import ReplayBuffer
+from data.loader import load_tinystories, load_gsm8k, load_local_dataset, load_mgsm
 from version import __version__
 from run_tinystories_gsm8k_chain import (
     start_upload_worker, shutdown_upload_worker, 
@@ -42,7 +42,7 @@ from run_tinystories_gsm8k_chain import (
     count_parameters, compute_perplexity,
     set_experiment_folder
 )
-from hf_utils import check_for_tinystories_restorepoint, generate_model_card, download_foundation_model
+from hf.utils import check_for_tinystories_restorepoint, generate_model_card, download_foundation_model
 
 # ============================================================================
 # CONFIGURATION
@@ -83,7 +83,7 @@ CONFIG = {
 }
 
 # Use unified HF repo manager
-from hf_repo_manager import HFRepoManager
+from hf.repo_manager import HFRepoManager
 HF_MANAGER = HFRepoManager("rosetta_stone")
 HF_REPO = "darealSven/dge"
 

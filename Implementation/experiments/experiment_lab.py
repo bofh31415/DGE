@@ -3,9 +3,9 @@ import os
 import sys
 import torch
 import torch.nn.functional as F
-from model_manager import ModelManager, Diary
-from dge_model import DGESimpleTransformer
-from dge_training import train_task, TaskType
+from utils.model_manager import ModelManager, Diary
+from core.model import DGESimpleTransformer
+from core.training import train_task, TaskType
 import time
 import json
 import numpy as np
@@ -86,7 +86,7 @@ class ExperimentLab:
         print("-" * 30)
         
         # Check for RunPod API Key
-        import runpod_manager
+        import cloud.runpod_manager as runpod_manager
         try:
             pods = runpod_manager.list_pods()
             print(f"Active Pods: {len(pods)}")

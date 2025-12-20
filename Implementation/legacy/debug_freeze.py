@@ -1,8 +1,8 @@
 """Debug: Check all frozen components during training."""
 import torch
-from dge_model import DGESimpleTransformer
-from dge_training import TaskType, generate_batch, evaluate_task
-from dge_utils import DGEAdamW
+from core.model import DGESimpleTransformer
+from core.training import TaskType, generate_batch, evaluate_task
+from core.utils import DGEAdamW
 
 # Create and train Task A
 print("Training Task A...")

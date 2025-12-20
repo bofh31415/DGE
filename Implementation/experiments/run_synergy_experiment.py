@@ -2,10 +2,10 @@ import os
 import torch
 import math
 from datetime import datetime
-from dge_model import DGESimpleTransformer
-from dge_training import train_task, TaskType
-from dge_utils import DGEAdamW
-from dge_logger import DGELogger
+from core.model import DGESimpleTransformer
+from core.training import train_task, TaskType
+from core.utils import DGEAdamW
+from utils.logger import DGELogger
 
 def generate_samples(model, task_type, vocab_size, count=10):
     """

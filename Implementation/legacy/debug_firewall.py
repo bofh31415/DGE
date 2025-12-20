@@ -1,7 +1,7 @@
 """Debug script to check Firewall initialization."""
 import torch
-from dge_model import DGESimpleTransformer
-from dge_utils import MoEGatedLinear
+from core.model import DGESimpleTransformer
+from core.utils import MoEGatedLinear
 
 # Create and expand model
 model = DGESimpleTransformer(vocab_size=500, d_model=64, n_layer=2, n_head=4)

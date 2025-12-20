@@ -236,7 +236,7 @@ This model was trained using **Dynamic Growth Expansion (DGE)**, a novel archite
 ## Usage
 
 ```python
-from dge_model import DGESimpleTransformer
+from core.model import DGESimpleTransformer
 import torch
 
 # Load the model

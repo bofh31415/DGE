@@ -1,8 +1,8 @@
 """Debug: Check if gates are specializing for different tasks."""
 import torch
-from dge_model import DGESimpleTransformer
-from dge_training import TaskType, generate_batch, evaluate_task
-from dge_utils import DGEAdamW, HybridGate
+from core.model import DGESimpleTransformer
+from core.training import TaskType, generate_batch, evaluate_task
+from core.utils import DGEAdamW, HybridGate
 
 # Create and train Task A
 print("Training Task A...")

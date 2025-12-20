@@ -1,7 +1,7 @@
 """Test embedding dge_mask fix for DGEAdamW weight decay protection."""
 import torch
 import torch.nn as nn
-from dge_utils import expand_embedding, DGEAdamW
+from core.utils import expand_embedding, DGEAdamW
 
 # Create and expand embedding
 emb = nn.Embedding(10, 4)

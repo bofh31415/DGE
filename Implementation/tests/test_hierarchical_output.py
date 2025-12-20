@@ -16,8 +16,8 @@ import os
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
-from dge_model import DGESimpleTransformer
-from dge_utils import DGEAdamW
+from core.model import DGESimpleTransformer
+from core.utils import DGEAdamW
 
 
 class TestHierarchicalOutput(unittest.TestCase):

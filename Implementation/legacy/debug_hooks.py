@@ -1,8 +1,8 @@
 """Debug: Check if gradient hooks are preventing Q_TL updates."""
 import torch
-from dge_model import DGESimpleTransformer
-from dge_training import TaskType, generate_batch
-from dge_utils import DGEAdamW
+from core.model import DGESimpleTransformer
+from core.training import TaskType, generate_batch
+from core.utils import DGEAdamW
 
 # Create and train Task A
 model = DGESimpleTransformer(vocab_size=500, d_model=64, n_layer=2, n_head=4)

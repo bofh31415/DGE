@@ -58,7 +58,7 @@ def generate_batch(task_type, vocab_size, batch_size, seq_len):
     
     return x, y
 
-from model_manager import ModelManager
+from utils.model_manager import ModelManager
 
 def train_task(model, task_type, vocab_size=1000, steps=500, batch_size=32, seq_len=32, 
                logger=None, start_step=0, checkpoint_fn=None, optimizer=None, probe_task_type=None,
@@ -272,7 +272,7 @@ def train_dataset(model, dataloader, epochs=1, optimizer=None, logger=None,
     Returns:
         Next available step number.
     """
-    from replay_buffer import ReplayBuffer, estimate_replay_ratio
+    from data.replay_buffer import ReplayBuffer, estimate_replay_ratio
     
     print(f"\n--- Starting Dataset Training: {task_name} ({epochs} epochs) ---")
     

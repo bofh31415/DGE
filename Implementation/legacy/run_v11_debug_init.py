@@ -1,8 +1,8 @@
 import os
 import torch
 import torch.nn as nn
-from dge_model import DGESimpleTransformer
-from dge_utils import MoEGatedLinear, HybridGate
+from core.model import DGESimpleTransformer
+from core.utils import MoEGatedLinear, HybridGate
 
 def run_v11_debug_init():
     print(f"\n" + "="*60)

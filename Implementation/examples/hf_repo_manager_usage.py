@@ -4,7 +4,7 @@ Example: Using HFRepoManager for Unified HF Structure
 Shows how to integrate HFRepoManager into experiment scripts.
 """
 
-from hf_repo_manager import HFRepoManager, wait_for_uploads
+from hf.repo_manager import HFRepoManager, wait_for_uploads
 
 # Initialize for your experiment
 manager = HFRepoManager("tinystories_gsm8k")

@@ -2,7 +2,7 @@ import sys
 import os
 import torch
 from main import DGELab, TaskType
-from dge_training import train_task, evaluate_task
+from core.training import train_task, evaluate_task
 
 def run_experiment():
     print("\n" + "="*60)
@@ -32,7 +32,7 @@ def run_experiment():
         # Create fresh model manually to match menu creation
         # Using standard 64/1000 defaults
         lab.model_name = f"replay_exp_{pct}"
-        from dge_model import DGESimpleTransformer
+        from core.model import DGESimpleTransformer
         lab.model = DGESimpleTransformer(vocab_size=vocab_size, d_model=d_model, n_layer=2, n_head=4)
         lab.model_name = f"replay_ratio_{pct}"
         lab.optimizer = torch.optim.AdamW(lab.model.parameters(), lr=1e-3, weight_decay=0.0) # Match create_model logic
@@ -68,7 +68,7 @@ def run_experiment():
                 router_params.append(param)
             else:
                 default_params.append(param)
-        from dge_utils import DGEAdamW
+        from core.utils import DGEAdamW
         lab.optimizer = DGEAdamW([
             {'params': default_params, 'lr': 1e-3},
             {'params': router_params, 'lr': 1e-4} 

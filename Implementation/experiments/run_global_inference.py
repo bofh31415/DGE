@@ -19,7 +19,7 @@ import torch.nn.functional as F
 from huggingface_hub import hf_hub_download, list_repo_files, HfApi
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dge_model import DGESimpleTransformer
+from core.model import DGESimpleTransformer
 
 HF_REPO = "darealSven/dge"
 CACHE_DIR = "models/inference_cache"

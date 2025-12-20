@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from dge_utils import expand_dge_linear, expand_layer_norm, expand_embedding, expand_parameter, expand_linear_and_freeze_old, MoEGatedLinear, HybridGate, Quadrant
+from core.utils import expand_dge_linear, expand_layer_norm, expand_embedding, expand_parameter, expand_linear_and_freeze_old, MoEGatedLinear, HybridGate, Quadrant
 
 class DGEBlock(nn.Module):
     def __init__(self, d_model, n_head, router_type='linear'):
@@ -104,7 +104,7 @@ class DGESimpleTransformer(nn.Module):
         self.layers = nn.ModuleList([DGEBlock(d_model, n_head) for _ in range(n_layer)])
         
         # V 0.13.0: Use HierarchicalOutputHead for skill-isolated additive synergy
-        from dge_utils import HierarchicalOutputHead
+        from core.utils import HierarchicalOutputHead
         self.lm_head = HierarchicalOutputHead(d_model, vocab_size)
         
     def forward(self, idx, targets=None, sparsity_lambda=0.05, base_only=False):
@@ -226,7 +226,7 @@ class DGESimpleTransformer(nn.Module):
 
         # Expand Head
         # V 0.13.0: Skip if HierarchicalOutputHead (handles skills via add_skill_head())
-        from dge_utils import HierarchicalOutputHead
+        from core.utils import HierarchicalOutputHead
         if not isinstance(self.lm_head, HierarchicalOutputHead):
             # Legacy path: expand MoEGatedLinear lm_head
             self.lm_head = expand_dge_linear(

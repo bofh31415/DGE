@@ -8,8 +8,8 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from main import DGELab
-from dge_utils import DGEAdamW
-from dge_training import train_task
+from core.utils import DGEAdamW
+from core.training import train_task
 
 class TestExperimentChainV2(unittest.TestCase):
     def setUp(self):

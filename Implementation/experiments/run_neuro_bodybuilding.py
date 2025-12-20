@@ -21,10 +21,10 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 
-import data
-import dge_model
+import data.loader as data
+import core.model as dge_model
 import neuro_bodybuilding
-from dge_logger import DGELogger
+from utils.logger import DGELogger
 
 # Load environment variables
 load_dotenv()
@@ -77,8 +77,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Use unified HF repo manager
     # Use unified HF repo manager
-from hf_repo_manager import HFRepoManager, wait_for_uploads
-from hf_utils import download_foundation_model # Import
+from hf.repo_manager import HFRepoManager, wait_for_uploads
+from hf.utils import download_foundation_model # Import
 HF_MANAGER = HFRepoManager("neuro_bodybuilding")
 HF_REPO = "darealSven/dge"
 
