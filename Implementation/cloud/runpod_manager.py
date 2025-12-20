@@ -322,24 +322,32 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     print(f"📈 Estimated Cost: {price_str}/hr")
     
     # Construct the robust startup command
-    # V0.19.0: Added progress echo statements for visibility
+    # V0.20.0: Timestamped logging to /workspace/startup.log
     cleanup_step = " && python -m experiments.pod_cleanup" if auto_terminate else ""
     repo_name = os.getenv("HF_REPO", "darealSven/dge")
+    log_file = "/workspace/startup.log"
     
-    # Progress-tracked setup command
+    # Helper: log with timestamp
+    def log_cmd(msg):
+        return f"echo \"$(date '+%Y-%m-%d %H:%M:%S') {msg}\" | tee -a {log_file}"
+    
+    # Build setup command with timestamps and logging
     setup_cmd = (
-        "echo '🚀 [1/5] Updating apt...' && apt-get update -qq && "
-        "echo '📦 [2/5] Installing git...' && apt-get install -y git -qq && "
-        f"echo '📂 [3/5] Cloning repo...' && git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
-        "cd DGE/Implementation && "
-        "echo '🐍 [4/5] Installing Python dependencies (this takes 2-3 min)...' && pip install -q -r requirements.txt && "
+        f"exec > >(tee -a {log_file}) 2>&1 && "  # Redirect all output to log
+        f"{log_cmd('[1/6] Starting setup...')} && "
+        f"{log_cmd('[2/6] Updating apt...')} && apt-get update -qq && "
+        f"{log_cmd('[3/6] Installing git...')} && apt-get install -y git -qq && "
+        f"{log_cmd('[4/6] Cloning repo...')} && git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
+        f"cd DGE/Implementation && "
+        f"{log_cmd('[5/6] Installing Python dependencies...')} && pip install -r requirements.txt 2>&1 && "
         f"export HF_TOKEN={HF_TOKEN} && "
         f"export GIT_TOKEN={GIT_TOKEN} && "
         f"export RUNPOD_API_KEY={RUNPOD_API_KEY} && "
         f"export HF_REPO={repo_name} && "
-        f"echo '✅ [5/5] Starting experiment: {command}' && "
-        f"{command}{cleanup_step}"
+        f"{log_cmd('[6/6] Starting experiment: {command}')} && "
+        f"{command} 2>&1 {cleanup_step}"
     )
+
 
     mutation = """
     mutation($input: PodFindAndDeployOnDemandInput!) {
@@ -386,6 +394,7 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     print(f"\n⏳ Waiting for container startup (Timeout: {timeout_seconds}s)...")
     print("   Note: 'pip install' takes 2-3 minutes. Check RunPod Console for live logs.")
     
+    container_started = False
     while elapsed < timeout_seconds:
         remaining = timeout_seconds - elapsed
         print(f"   ⏱️ Time remaining: {remaining}s | Status: Checking...", end='\r')
@@ -397,12 +406,18 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
             our_pod = next((p for p in pods if p['id'] == pod_id), None)
             if our_pod:
                 runtime = our_pod.get('runtime', {})
-                uptime = runtime.get('uptimeInSeconds', 0)
+                uptime = runtime.get('uptimeInSeconds', 0) 
                 status = our_pod.get('status', 'UNKNOWN')
                 
-                if uptime > 0:
-                    print(f"\n✅ Pod runtime started! Uptime: {uptime}s")
-                    return pod_id
+                # Check if container is running (even with 0 uptime)
+                if status == "RUNNING":
+                    container_started = True
+                    if uptime > 0:
+                        print(f"\n✅ Pod runtime started! Uptime: {uptime}s")
+                        return pod_id
+                    else:
+                        # Container is RUNNING but uptime is 0 - setup in progress
+                        print(f"   ⏱️ Time remaining: {remaining}s | Status: {status} (setup in progress)", end='\r')
                 else:
                     print(f"   ⏱️ Time remaining: {remaining}s | Status: {status}   ", end='\r')
         except Exception as e:
@@ -410,10 +425,17 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
             
     print() # Newline after loop
     
-    print(f"⚠️ Pod did not start within {timeout_seconds}s.")
-    print(f"🛑 Auto-terminating stuck pod {pod_id} to prevent ghost charges...")
-    terminate_pod(pod_id)
-    raise Exception(f"Deployment timed out after {timeout_seconds}s (Pod {pod_id} terminated)")
+    # If container started but setup is still running, DON'T terminate - just return
+    if container_started:
+        print(f"✅ Container is RUNNING! Setup still in progress.")
+        print(f"   The experiment will continue. Monitor at: https://www.runpod.io/console/pods")
+        return pod_id
+    else:
+        # Container never started - something is wrong, terminate
+        print(f"⚠️ Container did not start within {timeout_seconds}s.")
+        print(f"🛑 Auto-terminating stuck pod {pod_id} to prevent ghost charges...")
+        terminate_pod(pod_id)
+        raise Exception(f"Deployment timed out after {timeout_seconds}s (Pod {pod_id} terminated)")
 
 
 def terminate_pod(pod_id):
