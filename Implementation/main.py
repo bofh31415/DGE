@@ -346,7 +346,7 @@ class DGEDashboard:
         confirm = input("Confirm Deployment? (y/n): ").strip().lower()
         if confirm == 'y':
             import cloud.runpod_manager as runpod_manager
-            runpod_manager.deploy_experiment("python run_dge_grand_tour.py")
+            runpod_manager.deploy_experiment("python -m experiments.run_dge_grand_tour")
             print("\n✅ Grand Tour is running in the cloud. Check 'Cloud Ops' for status.")
         input("\nPress Enter to return...")
 
