@@ -36,20 +36,59 @@ def run_query(query, variables=None):
     return result['data']
 
 
-# GPU Performance Database (TFLOPS for FP16 training, approximate)
-# Source: Official specs and benchmarks
+# GPU Performance Database (TFLOPS for FP16/BF16 training, approximate)
+# Keys match RunPod's displayName format
 GPU_PERFORMANCE = {
-    "NVIDIA GeForce RTX 4090": {"tflops": 82.6, "vram": 24},
-    "NVIDIA GeForce RTX 4080": {"tflops": 48.7, "vram": 16},
-    "NVIDIA GeForce RTX 4070 Ti": {"tflops": 40.1, "vram": 12},
-    "NVIDIA GeForce RTX 3090": {"tflops": 35.6, "vram": 24},
-    "NVIDIA GeForce RTX 3080": {"tflops": 29.8, "vram": 10},
-    "NVIDIA A100 PCIe": {"tflops": 77.9, "vram": 40},
-    "NVIDIA A100 SXM": {"tflops": 77.9, "vram": 80},
-    "NVIDIA A40": {"tflops": 37.4, "vram": 48},
-    "NVIDIA L40": {"tflops": 181.0, "vram": 48},
-    "NVIDIA H100 PCIe": {"tflops": 204.9, "vram": 80},
-    "NVIDIA H100 SXM": {"tflops": 267.6, "vram": 80},
+    # Consumer RTX 40 Series
+    "RTX 4090": {"tflops": 82.6, "vram": 24},
+    "RTX 4080 SUPER": {"tflops": 52.2, "vram": 16},
+    "RTX 4080": {"tflops": 48.7, "vram": 16},
+    "RTX 4070 Ti SUPER": {"tflops": 44.1, "vram": 16},
+    "RTX 4070 Ti": {"tflops": 40.1, "vram": 12},
+    "RTX 4070 SUPER": {"tflops": 35.5, "vram": 12},
+    "RTX 4070": {"tflops": 29.2, "vram": 12},
+    # Consumer RTX 30 Series
+    "RTX 3090 Ti": {"tflops": 40.0, "vram": 24},
+    "RTX 3090": {"tflops": 35.6, "vram": 24},
+    "RTX 3080 Ti": {"tflops": 34.1, "vram": 12},
+    "RTX 3080": {"tflops": 29.8, "vram": 10},
+    "RTX 3070 Ti": {"tflops": 21.7, "vram": 8},
+    "RTX 3070": {"tflops": 20.3, "vram": 8},
+    # RTX 50 Series (Blackwell)
+    "RTX 5090": {"tflops": 170.0, "vram": 32},  # Estimated
+    "RTX 5080": {"tflops": 95.0, "vram": 16},   # Estimated
+    # Professional RTX A Series
+    "RTX A6000": {"tflops": 38.7, "vram": 48},
+    "RTX A5000": {"tflops": 27.8, "vram": 24},
+    "RTX A4500": {"tflops": 23.7, "vram": 20},
+    "RTX A4000": {"tflops": 19.2, "vram": 16},
+    "RTX A2000": {"tflops": 7.99, "vram": 6},
+    # Professional RTX Ada Series  
+    "RTX 4000 Ada": {"tflops": 26.7, "vram": 20},
+    "RTX 4000 Ada SFF": {"tflops": 19.2, "vram": 20},
+    "RTX PRO 6000": {"tflops": 91.1, "vram": 96},
+    # Data Center - NVIDIA A Series
+    "A100 PCIe": {"tflops": 77.9, "vram": 40},
+    "A100 SXM": {"tflops": 77.9, "vram": 80},
+    "A40": {"tflops": 37.4, "vram": 48},
+    "A30": {"tflops": 20.0, "vram": 24},
+    "A10": {"tflops": 31.2, "vram": 24},
+    # Data Center - NVIDIA L Series (Ada Lovelace)
+    "L40": {"tflops": 181.0, "vram": 48},
+    "L40S": {"tflops": 366.0, "vram": 48},
+    "L4": {"tflops": 30.3, "vram": 24},
+    # Data Center - NVIDIA H Series (Hopper)
+    "H100 PCIe": {"tflops": 204.9, "vram": 80},
+    "H100 SXM": {"tflops": 267.6, "vram": 80},
+    "H100 NVL": {"tflops": 267.6, "vram": 94},
+    "H200 SXM": {"tflops": 267.6, "vram": 141},  # Same compute as H100, more VRAM
+    # Data Center - NVIDIA B Series (Blackwell)
+    "B200": {"tflops": 500.0, "vram": 180},  # Estimated
+    # Legacy V100
+    "Tesla V100": {"tflops": 14.0, "vram": 16},
+    "V100 FHHL": {"tflops": 14.0, "vram": 16},
+    "V100 SXM2": {"tflops": 15.7, "vram": 16},
+    "V100 SXM2 32GB": {"tflops": 15.7, "vram": 32},
 }
 
 def get_available_gpus():
@@ -63,24 +102,25 @@ def get_available_gpus():
         id
         displayName
         memoryInGb
-        lowestPrice(input: {onDemand: false}) {
-          price
-        }
+        securePrice
+        communityPrice
       }
     }
     """
+
     try:
         data = run_query(query)
         gpus = data.get('gpuTypes', [])
         
         result = []
         for g in gpus:
-            if not g.get('lowestPrice'):
+            # Use communityPrice (spot) if available, otherwise securePrice
+            price = g.get('communityPrice') or g.get('securePrice')
+            if not price or price <= 0:
                 continue
                 
             gpu_id = g['id']
             name = g['displayName']
-            price = g['lowestPrice']['price']
             vram = g.get('memoryInGb', 0)
             
             # Lookup performance data
@@ -195,23 +235,21 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     print(f"📈 Estimated Cost: ${price}/hr")
     
     # Construct the robust startup command
-    # V0.16.0: Added pod_cleanup.py execution at the end
-    # V0.17.0: Start remote_inference_server in parallel
-    cleanup_step = " && python pod_cleanup.py" if auto_terminate else ""
+    # V0.18.0: Simplified to avoid nested quote issues
+    cleanup_step = " && python -m experiments.pod_cleanup" if auto_terminate else ""
     repo_name = os.getenv("HF_REPO", "darealSven/dge")
     
+    # Use double quotes for outer, escape inner quotes
     setup_cmd = (
-        f"apt-get update && apt-get install -y git tmux && "
+        f"apt-get update && apt-get install -y git && "
         f"git clone https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
         f"cd DGE/Implementation && "
         f"pip install -r requirements.txt && "
-        f"echo 'HF_TOKEN={HF_TOKEN}' > .env && "
-        f"echo 'GIT_TOKEN={GIT_TOKEN}' >> .env && "
-        f"echo 'RUNPOD_API_KEY={RUNPOD_API_KEY}' >> .env && "
-        f"echo 'HF_REPO={repo_name}' >> .env && "
-        f"echo 'RUNPOD_POD_ID='$(printenv RUNPOD_POD_ID) >> .env && "
-        f"tmux new -d -s inference 'source .env && python remote_inference_server.py' && "
-        f"tmux new -d -s experiment 'source .env && {command}{cleanup_step}'"
+        f"export HF_TOKEN={HF_TOKEN} && "
+        f"export GIT_TOKEN={GIT_TOKEN} && "
+        f"export RUNPOD_API_KEY={RUNPOD_API_KEY} && "
+        f"export HF_REPO={repo_name} && "
+        f"{command}{cleanup_step}"
     )
 
     mutation = """
@@ -219,24 +257,27 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
       podFindAndDeployOnDemand(input: $input) {
         id
         imageName
-        status
+        desiredStatus
       }
     }
     """
+
     
     variables = {
         "input": {
+            "name": f"dge-experiment-{int(time.time())}",
             "gpuCount": gpu_count,
             "gpuTypeId": gpu_type,
+            "cloudType": "COMMUNITY" if is_spot else "SECURE",
             "imageName": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
             "containerDiskInGb": 40,
             "volumeInGb": 40,
-            "volumeEncrypted": True,
-            "interruptible": is_spot,
-            "ports": "5000/http", # V0.17.0: Expose inference port
-            "dockerArgs": f"bash -c '{setup_cmd}'"
+            "ports": "5000/http,22/tcp",
+            "startSsh": True,
+            "dockerArgs": setup_cmd
         }
     }
+
     
     data = run_query(mutation, variables)
     pod = data['podFindAndDeployOnDemand']
@@ -267,18 +308,42 @@ def list_pods():
         pods {
           id
           name
+          desiredStatus
+          machine {
+            gpuDisplayName
+          }
           runtime {
             uptimeInSeconds
-            address
+            ports {
+              ip
+              publicPort
+            }
           }
-          status
-          gpuTypeId
         }
       }
     }
     """
     data = run_query(query)
-    return data['myself']['pods']
+    pods = data['myself']['pods']
+    
+    # Transform to expected format for compatibility
+    result = []
+    for p in pods:
+        # Extract first port address if available
+        ports = p.get('runtime', {}).get('ports', []) if p.get('runtime') else []
+        addr = f"{ports[0]['ip']}:{ports[0]['publicPort']}" if ports else "N/A"
+        
+        result.append({
+            'id': p['id'],
+            'name': p.get('name', ''),
+            'status': p.get('desiredStatus', 'UNKNOWN'),
+            'gpuTypeId': p.get('machine', {}).get('gpuDisplayName', 'Unknown'),
+            'runtime': {
+                'uptimeInSeconds': p.get('runtime', {}).get('uptimeInSeconds', 0) if p.get('runtime') else 0,
+                'address': addr
+            }
+        })
+    return result
 
 if __name__ == "__main__":
     # Internal CLI for testing
