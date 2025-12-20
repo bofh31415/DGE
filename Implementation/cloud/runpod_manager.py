@@ -286,7 +286,36 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     print(f"✅ Pod created! ID: {pod_id}")
     print(f"🔗 Monitor here: https://www.runpod.io/console/pods")
     
-    return pod_id
+    
+    # Wait for pod to actually start (with timeout)
+    timeout_seconds = 120  # Reduced to 2 minutes
+    poll_interval = 10
+    elapsed = 0
+    
+    print(f"⏳ Waiting for pod runtime to start (timeout: {timeout_seconds}s)...")
+    while elapsed < timeout_seconds:
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+        
+        try:
+            pods = list_pods()
+            our_pod = next((p for p in pods if p['id'] == pod_id), None)
+            if our_pod:
+                runtime = our_pod.get('runtime', {})
+                uptime = runtime.get('uptimeInSeconds', 0)
+                if uptime > 0:
+                    print(f"✅ Pod runtime started! Uptime: {uptime}s")
+                    return pod_id
+                else:
+                    print(f"   Waiting... ({elapsed}s elapsed, status: {our_pod.get('status', 'UNKNOWN')})")
+        except Exception as e:
+            print(f"   Poll error: {e}")
+    
+    print(f"⚠️ Pod did not start within {timeout_seconds}s.")
+    print(f"🛑 Auto-terminating stuck pod {pod_id} to prevent ghost charges...")
+    terminate_pod(pod_id)
+    raise Exception(f"Deployment timed out after {timeout_seconds}s (Pod {pod_id} terminated)")
+
 
 def terminate_pod(pod_id):
     """Terminate a pod to save costs."""

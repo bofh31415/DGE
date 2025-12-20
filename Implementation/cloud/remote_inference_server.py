@@ -45,6 +45,14 @@ def load_live_model(family=None, stage=None):
             model.to(device)
             model.eval()
             
+          # Start Logging
+            os.makedirs("models", exist_ok=True)
+            logging.basicConfig(
+                filename='models/remote_server.log',
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s'
+            )
+            
             active_state["model"] = model
             if active_state["tokenizer"] is None:
                 active_state["tokenizer"] = GPT2Tokenizer.from_pretrained('gpt2')
