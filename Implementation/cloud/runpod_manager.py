@@ -36,15 +36,33 @@ def run_query(query, variables=None):
     return result['data']
 
 
-def find_cheapest_gpu(gpu_display_name="NVIDIA GeForce RTX 4090"):
+# GPU Performance Database (TFLOPS for FP16 training, approximate)
+# Source: Official specs and benchmarks
+GPU_PERFORMANCE = {
+    "NVIDIA GeForce RTX 4090": {"tflops": 82.6, "vram": 24},
+    "NVIDIA GeForce RTX 4080": {"tflops": 48.7, "vram": 16},
+    "NVIDIA GeForce RTX 4070 Ti": {"tflops": 40.1, "vram": 12},
+    "NVIDIA GeForce RTX 3090": {"tflops": 35.6, "vram": 24},
+    "NVIDIA GeForce RTX 3080": {"tflops": 29.8, "vram": 10},
+    "NVIDIA A100 PCIe": {"tflops": 77.9, "vram": 40},
+    "NVIDIA A100 SXM": {"tflops": 77.9, "vram": 80},
+    "NVIDIA A40": {"tflops": 37.4, "vram": 48},
+    "NVIDIA L40": {"tflops": 181.0, "vram": 48},
+    "NVIDIA H100 PCIe": {"tflops": 204.9, "vram": 80},
+    "NVIDIA H100 SXM": {"tflops": 267.6, "vram": 80},
+}
+
+def get_available_gpus():
     """
-    Queries the RunPod API to find the current cheapest spot price for a specific GPU.
+    Queries RunPod API for available GPUs with spot prices.
+    Returns a list of dicts with id, name, price, tflops, vram, value_score.
     """
     query = """
     query {
       gpuTypes {
         id
         displayName
+        memoryInGb
         lowestPrice(input: {onDemand: false}) {
           price
         }
@@ -55,24 +73,111 @@ def find_cheapest_gpu(gpu_display_name="NVIDIA GeForce RTX 4090"):
         data = run_query(query)
         gpus = data.get('gpuTypes', [])
         
-        candidates = [g for g in gpus if gpu_display_name.lower() in g['displayName'].lower()]
-        if not candidates:
-            print(f"⚠️ Warning: No '{gpu_display_name}' found. Using first available GPU.")
-            candidates = [g for g in gpus if g.get('lowestPrice')]
+        result = []
+        for g in gpus:
+            if not g.get('lowestPrice'):
+                continue
+                
+            gpu_id = g['id']
+            name = g['displayName']
+            price = g['lowestPrice']['price']
+            vram = g.get('memoryInGb', 0)
             
-        # Sort by price
-        candidates = [g for g in candidates if g.get('lowestPrice')]
-        candidates.sort(key=lambda x: x['lowestPrice']['price'])
+            # Lookup performance data
+            perf = GPU_PERFORMANCE.get(name, {"tflops": 20.0, "vram": vram})  # Default estimate
+            tflops = perf['tflops']
+            
+            # Value score: TFLOPS per dollar per hour
+            value_score = tflops / price if price > 0 else 0
+            
+            result.append({
+                "id": gpu_id,
+                "name": name,
+                "price": price,
+                "tflops": tflops,
+                "vram": vram,
+                "value": value_score
+            })
         
-        if candidates:
-            best = candidates[0]
-            print(f"💰 Found cheapest {best['displayName']}: ${best['lowestPrice']['price']}/hr")
-            return best['id'], best['lowestPrice']['price']
-            
+        # Sort by value score (best value first)
+        result.sort(key=lambda x: x['value'], reverse=True)
+        return result
+        
     except Exception as e:
-        print(f"⚠️ Error finding cheapest GPU: {e}")
+        print(f"⚠️ Error fetching GPUs: {e}")
+        return []
+
+def display_gpu_selection_menu(gpus):
+    """Display GPU options with prices and performance metrics."""
+    print("\n" + "="*85)
+    print("                         GPU SELECTION MENU (Spot Instances)")
+    print("="*85)
+    print(f"{'Idx':<4} | {'GPU':<30} | {'$/hr':<7} | {'TFLOPS':<8} | {'VRAM':<6} | {'Value':<8} | {'⭐'}")
+    print("-"*85)
+    
+    best_value_idx = 0  # First one is best (sorted by value)
+    
+    for idx, g in enumerate(gpus):
+        star = "⭐ BEST" if idx == best_value_idx else ""
+        print(f"{idx+1:<4} | {g['name']:<30} | ${g['price']:<6.2f} | {g['tflops']:<8.1f} | {g['vram']:<4}GB | {g['value']:<8.1f} | {star}")
+    
+    print("-"*85)
+    print(f"💡 Recommendation: #{1} ({gpus[0]['name']}) - Best TFLOPS per dollar!")
+    print("="*85)
+    
+    return best_value_idx
+
+def select_gpu_interactive():
+    """Interactive GPU selection. Returns (gpu_id, price) or None if cancelled."""
+    gpus = get_available_gpus()
+    
+    if not gpus:
+        print("❌ No GPUs available. Check your RUNPOD_API_KEY.")
+        return None, None
+    
+    best_idx = display_gpu_selection_menu(gpus)
+    
+    while True:
+        choice = input(f"\nSelect GPU [1-{len(gpus)}] (Enter for recommended, 'q' to cancel): ").strip().lower()
         
-    # Fallback to a safe default ID if API fails
+        if choice == 'q':
+            return None, None
+        elif choice == '':
+            # Use recommended
+            selected = gpus[best_idx]
+            print(f"✅ Selected: {selected['name']} @ ${selected['price']}/hr")
+            return selected['id'], selected['price']
+        else:
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(gpus):
+                    selected = gpus[idx]
+                    print(f"✅ Selected: {selected['name']} @ ${selected['price']}/hr")
+                    return selected['id'], selected['price']
+                else:
+                    print("Invalid selection. Try again.")
+            except ValueError:
+                print("Invalid input. Enter a number or press Enter for recommended.")
+
+def find_cheapest_gpu(gpu_display_name="NVIDIA GeForce RTX 4090"):
+    """
+    Queries the RunPod API to find the current cheapest spot price for a specific GPU.
+    (Legacy function - still used for non-interactive deployments)
+    """
+    gpus = get_available_gpus()
+    
+    # Filter by name if specified
+    if gpu_display_name:
+        candidates = [g for g in gpus if gpu_display_name.lower() in g['name'].lower()]
+    else:
+        candidates = gpus
+    
+    if candidates:
+        best = candidates[0]  # Already sorted by value
+        print(f"💰 Found cheapest {best['name']}: ${best['price']}/hr")
+        return best['id'], best['price']
+    
+    # Fallback
     return "NVIDIA GeForce RTX 4090", 0.69
 
 def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, is_spot=True):

@@ -278,21 +278,38 @@ class DGEDashboard:
         import cloud.runpod_manager as runpod_manager
         self.clear_screen()
         print("🚀 DEPLOY TO CLOUD")
+        print("="*50)
         print("Common Tasks:")
-        print("1. Symbol Synergy")
-        print("2. DGE Grand Tour")
+        print("1. Symbol Synergy (run_synergy_experiment)")
+        print("2. DGE Grand Tour (4-stage comprehensive test)")
         print("3. Custom Command")
+        print("q. Back")
         
-        c = input("\nSelect: ").strip()
-        if c == '1': cmd = "python run_synergy_experiment.py"
-        elif c == '2': cmd = "python run_dge_grand_tour.py"
+        c = input("\nSelect Task: ").strip().lower()
+        if c == '1': cmd = "python -m experiments.run_synergy_experiment"
+        elif c == '2': cmd = "python -m experiments.run_dge_grand_tour"
         elif c == '3': cmd = input("Bash command: ").strip()
+        elif c == 'q': return
         else: return
         
-        confirm = input(f"Launch '{cmd}' on RTX 4090? (y/n): ").strip().lower()
+        print(f"\n📋 Command: {cmd}")
+        print("\n🔍 Fetching available GPUs...")
+        
+        # Interactive GPU selection
+        gpu_id, price = runpod_manager.select_gpu_interactive()
+        
+        if gpu_id is None:
+            print("Deployment cancelled.")
+            input("\nPress Enter...")
+            return
+        
+        confirm = input(f"\n🚀 Deploy '{cmd}' on {gpu_id}? (y/n): ").strip().lower()
         if confirm == 'y':
-            runpod_manager.deploy_experiment(cmd)
-            input("\nPod initiated. Press Enter...")
+            runpod_manager.deploy_experiment(cmd, gpu_type=gpu_id)
+            input("\n✅ Pod initiated. Press Enter...")
+        else:
+            print("Deployment cancelled.")
+            input("\nPress Enter...")
 
     # --- SYNC OPERATIONS ---
     def sync_results_ui(self):
