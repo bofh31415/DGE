@@ -445,3 +445,40 @@ Centralize all DGE operations (Local Inference, Cloud Orchestration, and Result 
 ### Next Steps
 1. Formalize "Forensic Analysis" module to automatically graph Grand Tour results.
 2. Implement "Layer-wise Plasticity Visualization" in the dashboard.
+
+---
+
+## V 0.16.1: Cost Optimization (Spot Tactic)
+**Date:** 2025-12-20  
+**Branch:** `exp/hierarchical-output`
+
+### Goal
+Reduce operational costs by automating the discovery and deployment of the cheapest available RTX 4090 spot instances.
+
+### Key Changes
+- `runpod_manager.py`: Added `find_cheapest_gpu()` to query global spot prices.
+- Deployment: Switched `PodFindAndDeployOnDemand` to use `interruptible: true`.
+- Cost Reduction: Estimated savings of ~60% per experiment hour.
+
+---
+
+## V 0.17.0: Forensics & Remote Chat (Complete Commander)
+**Date:** 2025-12-20  
+**Branch:** `exp/hierarchical-output`
+
+### Goal
+Provide guaranteed data persistence and real-time interaction with cloud-resident models.
+
+### Key Changes
+- `remote_inference_server.py`: New Flask server for live on-pod inference.
+- `pod_cleanup.py`: Added `sync_forensics()` to ensure models, logs, and diaries are pushed to HF before termination.
+- `main.py`: Integrated "Remote Live Chat" UI for real-time emergence monitoring.
+- Integration: Exposed port 5000/http on all DGE cloud pods.
+
+### Verification
+- Forensic sync gate prevents pod termination on upload failure.
+- Remote chat tunnel successfully connects to pod IP and streams tokens.
+
+### Next Steps
+1. Execute the "DGE Grand Tour" on a $0.25/hr Spot 4090.
+2. Monitor "Rosetta Stone" synergy live via Remote Chat.

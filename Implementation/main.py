@@ -8,6 +8,7 @@ from dge_model import DGESimpleTransformer
 import time
 import json
 import subprocess
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,8 +51,9 @@ class DGEDashboard:
             print("Main Dashboard:")
             print("1. [Local] List Models & Inference")
             print("2. [Cloud] RunPod Operations (Deploy/Monitor)")
-            print("3. [Sync]  Pull Results from HuggingFace")
-            print("4. [Tour]  Direct Launch: DGE Grand Tour")
+            print("3. [Remote] Live Pod Chat (Emergence Monitoring)")
+            print("4. [Sync]  Pull Results from HuggingFace")
+            print("5. [Tour]  Direct Launch: DGE Grand Tour")
             print("q. Exit")
             
             choice = input("\nSelect Option: ").strip().lower()
@@ -61,8 +63,10 @@ class DGEDashboard:
             elif choice == '2':
                 self.cloud_ops_ui()
             elif choice == '3':
-                self.sync_results_ui()
+                self.remote_chat_ui()
             elif choice == '4':
+                self.sync_results_ui()
+            elif choice == '5':
                 self.launch_grand_tour_ui()
             elif choice == 'q':
                 sys.exit(0)
@@ -175,6 +179,101 @@ class DGEDashboard:
             if choice == '2':
                 self.deploy_ui()
 
+    def remote_chat_ui(self):
+        import runpod_manager
+        self.clear_screen()
+        print(TITLE)
+        print("--- REMOTE LIVE CHAT ---")
+        
+        try:
+            pods = runpod_manager.list_pods()
+            active_pods = [p for p in pods if p['status'] == 'RUNNING']
+            if not active_pods:
+                print("No running pods available for chat.")
+                input("\nPress Enter to return...")
+                return
+        except Exception as e:
+            print(f"❌ Error fetching pods: {e}")
+            input("Press Enter...")
+            return
+
+        print(f"{'Idx':<5} | {'Pod ID':<15} | {'GPU':<25} | {'Address'}")
+        print("-" * 70)
+        for idx, p in enumerate(active_pods):
+            addr = p.get('runtime', {}).get('address', 'Unknown')
+            print(f"{idx+1:<5} | {p['id']:<15} | {p['gpuTypeId']:<25} | {addr}")
+        
+        choice = input("\nSelect Pod to Chat (or 'b' for back): ").strip()
+        if choice.lower() == 'b': return
+
+        try:
+            p_idx = int(choice) - 1
+            if 0 <= p_idx < len(active_pods):
+                pod = active_pods[p_idx]
+                pod_addr = pod.get('runtime', {}).get('address', '')
+                if not pod_addr:
+                    print("❌ Pod address not found. Ensure port 5000 is exposed.")
+                    input("Press Enter...")
+                    return
+                
+                # Assume RunPod mapping format: the address provided is the Base HTTP URL
+                # We need to verify the port. Usually RunPod provides a direct address like [pod_id]-5000.proxy.runpod.net
+                # or a direct IP if TCP. For HTTP/5000 it is often a proxy URL.
+                
+                # Let's use a robust inference loop
+                self.run_remote_inference_loop(pod_addr)
+            else:
+                input("Invalid index. Press Enter...")
+        except ValueError:
+            pass
+
+    def run_remote_inference_loop(self, base_url):
+        # Normalize URL
+        if not base_url.startswith("http"):
+            base_url = f"http://{base_url}"
+        
+        # RunPod proxy URLs often look like: https://[pod_id]-5000.proxy.runpod.net
+        # If list_pods returns just an IP, we append :5000
+        if "http" not in base_url and "." not in base_url: # Likely just an IP
+             base_url = f"http://{base_url}:5000"
+        elif "proxy.runpod.net" not in base_url and ":" not in base_url[8:]:
+             base_url = f"{base_url}:5000"
+
+        self.clear_screen()
+        print(f"--- REMOTE SHELL: {base_url} ---")
+        print("Testing connection...")
+        
+        try:
+            resp = requests.get(f"{base_url}/status", timeout=5)
+            if resp.status_code == 200:
+                print("✅ Connection Established. Model is ready on-pod.")
+            else:
+                print(f"⚠️ Pod responded with {resp.status_code}. Server might be starting.")
+        except Exception as e:
+            print(f"❌ Could not connect to pod: {e}")
+            input("Press Enter...")
+            return
+
+        print("Type 'exit' to return.\n")
+        while True:
+            prompt = input("REMOTE USER > ").strip()
+            if prompt.lower() == 'exit': break
+            if not prompt: continue
+            
+            try:
+                start_time = time.time()
+                resp = requests.post(f"{base_url}/chat", json={"prompt": prompt, "max_tokens": 100}, timeout=30)
+                duration = time.time() - start_time
+                
+                if resp.status_code == 200:
+                    result = resp.json()
+                    print(f"AI CLOUD     > {result.get('response', 'Empty response')}")
+                    print(f"[Time: {duration*1000:.1f}ms]")
+                else:
+                    print(f"❌ Error from Pod: {resp.text}")
+            except Exception as e:
+                print(f"❌ Communication Error: {e}")
+                
     def deploy_ui(self):
         import runpod_manager
         self.clear_screen()
