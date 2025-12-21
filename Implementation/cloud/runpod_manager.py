@@ -333,7 +333,7 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
         f"echo [1/6] Starting setup... >> {log_file} && date >> {log_file} && "
         f"echo [2/6] Updating system... >> {log_file} && apt-get update -qq && apt-get install -y git -qq && "
         f"echo [3/6] Cloning repo... >> {log_file} && rm -rf /workspace/DGE && "
-        f"git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git /workspace/DGE && "
+        f"git clone --depth 1 -b exp/hierarchical-output https://{GIT_TOKEN}@github.com/bofh31415/DGE.git /workspace/DGE && "
         f"echo [4/6] Installing dependencies... >> {log_file} && "
         f"cd {work_dir} && pip install -r requirements.txt >> {log_file} 2>&1 && "
         f"export PYTHONPATH={work_dir}:$PYTHONPATH && "
