@@ -322,30 +322,33 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     print(f"📈 Estimated Cost: {price_str}/hr")
     
     # Construct the robust startup command
-    # V0.21.0: Wrap commands in bash -c for proper execution
+    # V0.21.1: Fixed working directory and clone issues
     cleanup_step = " && python -m experiments.pod_cleanup" if auto_terminate else ""
     repo_name = os.getenv("HF_REPO", "darealSven/dge")
     log_file = "/workspace/startup.log"
+    work_dir = "/workspace/DGE/Implementation"
     
     # Build the inner command string (will be passed to bash -c)
     inner_cmd = (
-        f"date >> {log_file} && echo [1/6] Starting setup... >> {log_file} && "
-        f"date >> {log_file} && echo [2/6] Updating apt... >> {log_file} && apt-get update -qq && "
-        f"date >> {log_file} && echo [3/6] Installing git... >> {log_file} && apt-get install -y git -qq && "
-        f"date >> {log_file} && echo [4/6] Cloning repo... >> {log_file} && git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
-        f"cd DGE/Implementation && "
-        f"date >> {log_file} && echo [5/6] Installing Python dependencies... >> {log_file} && pip install -r requirements.txt >> {log_file} 2>&1 && "
+        f"echo [1/6] Starting setup... >> {log_file} && date >> {log_file} && "
+        f"echo [2/6] Updating system... >> {log_file} && apt-get update -qq && apt-get install -y git -qq && "
+        f"echo [3/6] Cloning repo... >> {log_file} && rm -rf /workspace/DGE && "
+        f"git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git /workspace/DGE && "
+        f"echo [4/6] Installing dependencies... >> {log_file} && "
+        f"cd {work_dir} && pip install -r requirements.txt >> {log_file} 2>&1 && "
         f"export HF_TOKEN={HF_TOKEN} && "
         f"export GIT_TOKEN={GIT_TOKEN} && "
         f"export RUNPOD_API_KEY={RUNPOD_API_KEY} && "
         f"export HF_REPO={repo_name} && "
-        f"date >> {log_file} && echo [6/6] Starting experiment... >> {log_file} && "
-        f"{command} 2>&1 | tee -a {log_file}{cleanup_step}"
+        f"echo [5/6] Starting experiment... >> {log_file} && date >> {log_file} && "
+        f"cd {work_dir} && {command} 2>&1 | tee -a {log_file} && "
+        f"echo [6/6] Experiment complete. >> {log_file}{cleanup_step}"
     )
     
-    # Wrap in bash -c for proper execution (escape single quotes in inner_cmd)
+    # Wrap in bash -c for proper execution
     inner_cmd_escaped = inner_cmd.replace("'", "'\\''")
     setup_cmd = f"bash -c '{inner_cmd_escaped}'"
+
 
 
 
