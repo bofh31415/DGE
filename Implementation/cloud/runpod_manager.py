@@ -335,7 +335,7 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
         f"echo '=== [3/6] Cloning repo ===' && rm -rf /workspace/DGE && "
         f"git clone --depth 1 -b exp/hierarchical-output https://{GIT_TOKEN}@github.com/bofh31415/DGE.git /workspace/DGE && "
         f"echo '=== [4/6] Installing dependencies ===' && "
-        f"cd {work_dir} && pip install -r requirements.txt && "
+        f"cd {work_dir} && pip install --ignore-installed -r requirements.txt && "
         f"export PYTHONPATH={work_dir}:$PYTHONPATH && "
         f"export HF_TOKEN={HF_TOKEN} && "
         f"export GIT_TOKEN={GIT_TOKEN} && "
