@@ -500,6 +500,38 @@ def list_pods():
         })
     return result
 
+
+def get_pods_with_metrics():
+    """Get pods with GPU utilization metrics."""
+    query = """
+    query {
+      myself {
+        pods {
+          id
+          name
+          desiredStatus
+          machine {
+            gpuDisplayName
+          }
+          runtime {
+            uptimeInSeconds
+            gpus {
+              id
+              gpuUtilPercent
+              memoryUtilPercent
+            }
+            ports {
+              ip
+              publicPort
+            }
+          }
+        }
+      }
+    }
+    """
+    data = run_query(query)
+    return data['myself']['pods']
+
 if __name__ == "__main__":
     # Internal CLI for testing
     import argparse

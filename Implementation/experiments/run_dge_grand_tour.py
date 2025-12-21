@@ -5,8 +5,16 @@ import json
 import time
 from datetime import datetime
 
-# V 0.15.0: DGE Grand Tour Orchestrator
+# V 0.16.0: DGE Grand Tour Orchestrator with Progress Tracking
 # Executes the 4-stage experimental suite for deep DGE insights.
+
+# Import progress tracker (will work on RunPod)
+try:
+    from experiments.progress_tracker import update_progress, clear_progress
+except ImportError:
+    # Fallback for local runs
+    def update_progress(*args, **kwargs): pass
+    def clear_progress(): pass
 
 STAGES = [
     {
@@ -35,11 +43,19 @@ STAGES = [
     }
 ]
 
-def run_stage(stage):
+def run_stage(stage, total_stages):
     print(f"\n{'='*70}")
-    print(f"🚩 STAGE {stage['id']}: {stage['name']}")
+    print(f"🚩 STAGE {stage['id']}/{total_stages}: {stage['name']}")
     print(f"   {stage['description']}")
     print(f"{'='*70}")
+    
+    # Update progress at stage start
+    update_progress(
+        stage=stage['id'],
+        total_stages=total_stages,
+        stage_name=stage['name'],
+        status="running"
+    )
     
     start_time = time.time()
     
@@ -57,6 +73,14 @@ def run_stage(stage):
     duration = time.time() - start_time
     print(f"\n✅ Stage {stage['id']} Finished in {duration/60:.2f} minutes. Status: {status}")
     
+    # Update progress at stage complete
+    update_progress(
+        stage=stage['id'],
+        total_stages=total_stages,
+        stage_name=stage['name'],
+        status="completed" if status == "SUCCESS" else "failed"
+    )
+    
     return {
         "id": stage['id'],
         "name": stage['name'],
@@ -69,10 +93,14 @@ def main():
     print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Total Stages: {len(STAGES)}")
     
+    # Clear any old progress
+    clear_progress()
+    
     results = []
+    total_stages = len(STAGES)
     
     for stage in STAGES:
-        res = run_stage(stage)
+        res = run_stage(stage, total_stages)
         results.append(res)
         
         # If a stage fails, we still continue to the next one to get as much data as possible
@@ -81,6 +109,14 @@ def main():
     print("\n" + "#"*70)
     print("🏆 DGE GRAND TOUR COMPLETE")
     print("#"*70)
+    
+    # Final progress update
+    update_progress(
+        stage=total_stages,
+        total_stages=total_stages,
+        stage_name="Complete",
+        status="completed"
+    )
     
     report_path = "grand_tour_report.json"
     summary = {

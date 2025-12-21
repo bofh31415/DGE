@@ -158,7 +158,7 @@ class DGEDashboard:
                 import time as t
                 start = t.time()
                 print("⏳ Querying pods...", end='', flush=True)
-                pods = runpod_manager.list_pods()
+                pods = runpod_manager.get_pods_with_metrics()
                 elapsed = t.time() - start
                 print(f" ({elapsed:.1f}s)")
                 
@@ -166,7 +166,24 @@ class DGEDashboard:
                     print("No active pods.")
                 else:
                     for p in pods:
-                        print(f"[{p['id']}] {p['gpuTypeId']} - {p['status']} (Uptime: {p['runtime']['uptimeInSeconds']}s)")
+                        runtime = p.get("runtime") or {}
+                        gpus = runtime.get("gpus", [])
+                        gpu_util = gpus[0].get("gpuUtilPercent", 0) if gpus else 0
+                        mem_util = gpus[0].get("memoryUtilPercent", 0) if gpus else 0
+                        status = p.get("desiredStatus", "UNKNOWN")
+                        gpu_name = p.get("machine", {}).get("gpuDisplayName", "Unknown")
+                        
+                        # Status indicator
+                        if gpu_util > 50:
+                            indicator = "🔥 TRAINING"
+                        elif gpu_util > 0:
+                            indicator = "⚙️ Loading"
+                        elif status == "RUNNING":
+                            indicator = "⏳ Setup"
+                        else:
+                            indicator = status
+                        
+                        print(f"[{p['id']}] {gpu_name} | GPU: {gpu_util}% | {indicator}")
             except Exception as e:
                 print(f"\n⚠️ RunPod API Error: {e}")
 
@@ -175,6 +192,7 @@ class DGEDashboard:
             print("1. Refresh List")
             print("2. Deploy Single Experiment")
             print("3. Terminate Pod")
+            print("4. Watch Progress (live updates)")
             print("b. Back")
             
             choice = input("\nSelect Option: ").strip().lower()
@@ -183,10 +201,68 @@ class DGEDashboard:
             if choice == '3':
                 pid = input("Enter Pod ID to terminate: ").strip()
                 if pid: runpod_manager.terminate_pod(pid); time.sleep(1)
+            if choice == '4':
+                self.watch_pod_progress()
             if choice == '2':
                 self.deploy_ui()
 
+    def watch_pod_progress(self):
+        """Live monitoring of pod progress with GPU utilization."""
+        import cloud.runpod_manager as runpod_manager
+        
+        print("\n🔭 WATCH MODE - Press Ctrl+C to stop\n")
+        refresh_interval = 10  # seconds
+        
+        try:
+            while True:
+                try:
+                    pods = runpod_manager.get_pods_with_metrics()
+                    
+                    # Clear line and show timestamp
+                    print(f"\r[{time.strftime('%H:%M:%S')}] ", end='')
+                    
+                    if not pods:
+                        print("No active pods.", end='')
+                    else:
+                        for p in pods:
+                            runtime = p.get("runtime") or {}
+                            gpus = runtime.get("gpus", [])
+                            gpu_util = gpus[0].get("gpuUtilPercent", 0) if gpus else 0
+                            mem_util = gpus[0].get("memoryUtilPercent", 0) if gpus else 0
+                            status = p.get("desiredStatus", "UNKNOWN")
+                            gpu_name = p.get("machine", {}).get("gpuDisplayName", "?")
+                            
+                            # Status indicator with progress bar
+                            if gpu_util > 50:
+                                bar = "█" * (gpu_util // 10) + "░" * (10 - gpu_util // 10)
+                                indicator = f"🔥 TRAINING [{bar}] {gpu_util}%"
+                            elif gpu_util > 0:
+                                bar = "█" * (gpu_util // 10) + "░" * (10 - gpu_util // 10)
+                                indicator = f"⚙️ Loading [{bar}] {gpu_util}%"
+                            elif status == "RUNNING":
+                                indicator = "⏳ Setup (pip install...)"
+                            else:
+                                indicator = status
+                            
+                            print(f"{gpu_name} | {indicator}", end='')
+                    
+                    print("", flush=True)
+                    time.sleep(refresh_interval)
+                    
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    print(f"\r⚠️ Error: {e}", end='')
+                    time.sleep(refresh_interval)
+                    
+        except KeyboardInterrupt:
+            print("\n\n✅ Watch mode stopped.")
+        
+        input("\nPress Enter...")
+
+
     def remote_chat_ui(self):
+
         import cloud.runpod_manager as runpod_manager
         self.clear_screen()
         print(TITLE)
