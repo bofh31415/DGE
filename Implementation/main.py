@@ -423,7 +423,7 @@ class DGEDashboard:
         if confirm == 'y':
             import cloud.runpod_manager as runpod_manager
             try:
-                runpod_manager.deploy_experiment("python -m experiments.run_dge_grand_tour")
+                runpod_manager.deploy_experiment("python experiments/run_dge_grand_tour.py")
                 print("\n✅ Grand Tour is running in the cloud. Check 'Cloud Ops' for status.")
             except Exception as e:
                 error_msg = str(e)

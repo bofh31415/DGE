@@ -322,8 +322,8 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     print(f"📈 Estimated Cost: {price_str}/hr")
     
     # Construct the robust startup command
-    # V0.21.2: Added PYTHONPATH for module discovery
-    cleanup_step = " && python -m experiments.pod_cleanup" if auto_terminate else ""
+    # V0.22.0: Use direct script paths (bypass module system)
+    cleanup_step = " && python experiments/pod_cleanup.py" if auto_terminate else ""
     repo_name = os.getenv("HF_REPO", "darealSven/dge")
     log_file = "/workspace/startup.log"
     work_dir = "/workspace/DGE/Implementation"
