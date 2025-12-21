@@ -322,26 +322,27 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     print(f"📈 Estimated Cost: {price_str}/hr")
     
     # Construct the robust startup command
-    # V0.20.1: Fixed - removed bash-specific exec (not compatible with sh)
+    # V0.20.2: Using date command with backticks for sh compatibility
     cleanup_step = " && python -m experiments.pod_cleanup" if auto_terminate else ""
     repo_name = os.getenv("HF_REPO", "darealSven/dge")
     log_file = "/workspace/startup.log"
     
-    # Simple sh-compatible setup command with timestamps piped to log
+    # Use backticks and proper shell evaluation
     setup_cmd = (
-        f"echo \"$(date) [1/6] Starting setup...\" >> {log_file} && "
-        f"echo \"$(date) [2/6] Updating apt...\" >> {log_file} && apt-get update -qq && "
-        f"echo \"$(date) [3/6] Installing git...\" >> {log_file} && apt-get install -y git -qq && "
-        f"echo \"$(date) [4/6] Cloning repo...\" >> {log_file} && git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
+        f"date >> {log_file} && echo '[1/6] Starting setup...' >> {log_file} && "
+        f"date >> {log_file} && echo '[2/6] Updating apt...' >> {log_file} && apt-get update -qq && "
+        f"date >> {log_file} && echo '[3/6] Installing git...' >> {log_file} && apt-get install -y git -qq && "
+        f"date >> {log_file} && echo '[4/6] Cloning repo...' >> {log_file} && git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git && "
         f"cd DGE/Implementation && "
-        f"echo \"$(date) [5/6] Installing Python dependencies...\" >> {log_file} && pip install -r requirements.txt >> {log_file} 2>&1 && "
+        f"date >> {log_file} && echo '[5/6] Installing Python dependencies...' >> {log_file} && pip install -r requirements.txt >> {log_file} 2>&1 && "
         f"export HF_TOKEN={HF_TOKEN} && "
         f"export GIT_TOKEN={GIT_TOKEN} && "
         f"export RUNPOD_API_KEY={RUNPOD_API_KEY} && "
         f"export HF_REPO={repo_name} && "
-        f"echo \"$(date) [6/6] Starting experiment: {command}\" >> {log_file} && "
+        f"date >> {log_file} && echo '[6/6] Starting experiment: {command}' >> {log_file} && "
         f"{command} 2>&1 | tee -a {log_file} {cleanup_step}"
     )
+
 
 
 
