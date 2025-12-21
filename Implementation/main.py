@@ -422,9 +422,20 @@ class DGEDashboard:
         confirm = input("Confirm Deployment? (y/n): ").strip().lower()
         if confirm == 'y':
             import cloud.runpod_manager as runpod_manager
-            runpod_manager.deploy_experiment("python -m experiments.run_dge_grand_tour")
-            print("\n✅ Grand Tour is running in the cloud. Check 'Cloud Ops' for status.")
+            try:
+                runpod_manager.deploy_experiment("python -m experiments.run_dge_grand_tour")
+                print("\n✅ Grand Tour is running in the cloud. Check 'Cloud Ops' for status.")
+            except Exception as e:
+                error_msg = str(e)
+                if "does not have the resources" in error_msg:
+                    print("\n❌ RTX 4090 is currently OUT OF CAPACITY on RunPod.")
+                    print("   Use Cloud Ops → Deploy to select a different GPU.")
+                elif "timeout" in error_msg.lower():
+                    print(f"\n⏱️ Deployment timed out: {e}")
+                else:
+                    print(f"\n❌ Deployment failed: {e}")
         input("\nPress Enter to return...")
+
 
     def inference_shell(self):
         self._load_tokenizer()
