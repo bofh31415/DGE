@@ -322,7 +322,7 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     print(f"📈 Estimated Cost: {price_str}/hr")
     
     # Construct the robust startup command
-    # V0.21.1: Fixed working directory and clone issues
+    # V0.21.2: Added PYTHONPATH for module discovery
     cleanup_step = " && python -m experiments.pod_cleanup" if auto_terminate else ""
     repo_name = os.getenv("HF_REPO", "darealSven/dge")
     log_file = "/workspace/startup.log"
@@ -336,6 +336,7 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
         f"git clone --depth 1 https://{GIT_TOKEN}@github.com/bofh31415/DGE.git /workspace/DGE && "
         f"echo [4/6] Installing dependencies... >> {log_file} && "
         f"cd {work_dir} && pip install -r requirements.txt >> {log_file} 2>&1 && "
+        f"export PYTHONPATH={work_dir}:$PYTHONPATH && "
         f"export HF_TOKEN={HF_TOKEN} && "
         f"export GIT_TOKEN={GIT_TOKEN} && "
         f"export RUNPOD_API_KEY={RUNPOD_API_KEY} && "
@@ -344,6 +345,7 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
         f"cd {work_dir} && {command} 2>&1 | tee -a {log_file} && "
         f"echo [6/6] Experiment complete. >> {log_file}{cleanup_step}"
     )
+
     
     # Wrap in bash -c for proper execution
     inner_cmd_escaped = inner_cmd.replace("'", "'\\''")
