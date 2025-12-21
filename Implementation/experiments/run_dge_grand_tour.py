@@ -20,28 +20,29 @@ STAGES = [
     {
         "id": 1,
         "name": "Integrity Core (Symbol Synergy)",
-        "script": "run_synergy_experiment.py",
+        "script": "experiments/run_synergy_experiment.py",
         "description": "Verifies true additive synergy with Hierarchical Heads."
     },
     {
         "id": 2,
         "name": "Longevity Stress (10-Skill Chain)",
-        "script": "run_longevity_chain.py",
+        "script": "experiments/run_longevity_chain.py",
         "description": "Tests stability of Skill #1 after 10 sequential expansions."
     },
     {
         "id": 3,
         "name": "Intelligence Transfer (Rosetta Stone)",
-        "script": "run_rosetta_stone_experiment.py",
+        "script": "experiments/run_rosetta_stone_experiment.py",
         "description": "English Logic -> German Expression synergy."
     },
     {
         "id": 4,
         "name": "Efficiency Anatomy (Neuro-Bodybuilding)",
-        "script": "run_neuro_bodybuilding.py",
+        "script": "experiments/run_neuro_bodybuilding.py",
         "description": "Sparsity scaling limits of DGE quadrants."
     }
 ]
+
 
 def run_stage(stage, total_stages):
     print(f"\n{'='*70}")
