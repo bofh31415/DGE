@@ -318,11 +318,23 @@ class DGEDashboard:
                 return
             elif choice == '1':
                 # Deploy server and start interactive chat
-                confirm = input("\n🚀 Deploy inference server to RunPod? (y/n): ").strip().lower()
-                if confirm == 'y':
+                while True:  # Retry loop
+                    # Select GPU
+                    print("\n" + "="*60)
+                    gpu_id, is_spot, cost = runpod_manager.select_gpu_interactive()
+                    
+                    if not gpu_id:
+                        # User cancelled
+                        break
+                    
                     try:
                         print("\n📦 Deploying inference server...")
-                        pod_id = runpod_manager.deploy_experiment("python experiments/run_global_inference.py --server")
+                        pod_id = runpod_manager.deploy_experiment(
+                            "python experiments/run_global_inference.py --server",
+                            gpu_type=gpu_id,
+                            is_spot=is_spot,
+                            price=cost
+                        )
                         
                         # Wait for pod to be running and get address
                         print("\n⏳ Waiting for pod deployment...")
@@ -354,8 +366,10 @@ class DGEDashboard:
                         
                         if not server_url:
                             print("\n❌ Could not get server address. Check RunPod console.")
-                            input("\nPress Enter...")
-                            return
+                            retry = input("\nTry another GPU? (y/n): ").strip().lower()
+                            if retry != 'y':
+                                break
+                            continue
                         
                         # Test connection - pip install takes 2-3 minutes!
                         print(f"\n🔗 Server: {server_url}")
@@ -378,18 +392,26 @@ class DGEDashboard:
                             print("\n⚠️ Server not responding after 3 minutes.")
                             print("   The server might still be starting. Check RunPod logs.")
                             print(f"   Try later: curl {server_url}/health")
-                            input("\nPress Enter...")
-                            return
+                            retry = input("\nTry another GPU? (y/n): ").strip().lower()
+                            if retry != 'y':
+                                break
+                            continue
                         
                         # Interactive chat loop
                         self.remote_chat_with_server(server_url, models)
+                        break  # Exit retry loop after successful chat
                         
                     except Exception as e:
                         if "does not have the resources" in str(e):
-                            print("\n❌ GPU out of capacity. Try Cloud Ops → Deploy for other GPUs.")
+                            print(f"\n❌ GPU out of capacity: {str(e)}")
+                            retry = input("\nTry another GPU? (y/n): ").strip().lower()
+                            if retry != 'y':
+                                break
                         else:
                             print(f"\n❌ Deployment failed: {e}")
-                        input("\nPress Enter...")
+                            retry = input("\nTry again? (y/n): ").strip().lower()
+                            if retry != 'y':
+                                break
                         
             elif choice == '2':
                 confirm = input("\n🚀 Run automated suite on ALL models? (y/n): ").strip().lower()
