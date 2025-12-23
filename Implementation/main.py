@@ -338,29 +338,43 @@ class DGEDashboard:
                         
                         # Wait for pod to be running and get address
                         print("\n⏳ Waiting for pod deployment...")
-                        time.sleep(10)  # Initial wait
+                        time.sleep(15)  # Initial wait for pod startup
                         
                         server_url = None
-                        for attempt in range(30):  # Try for ~1 minute
-                            pods = runpod_manager.list_pods()
-                            our_pod = next((p for p in pods if p['id'] == pod_id), None)
-                            
-                            if our_pod and our_pod.get('status') == 'RUNNING':
-                                # Get port mapping
-                                runtime = our_pod.get('runtime', {})
-                                ports = runtime.get('ports', [])
+                        for attempt in range(60):  # Try for ~2 minutes
+                            try:
+                                pods = runpod_manager.get_pods_with_metrics()
+                                our_pod = next((p for p in pods if p['id'] == pod_id), None)
                                 
-                                if ports:
-                                    # Find the 5000 HTTP port mapping
-                                    for port_info in ports:
-                                        ip = port_info.get('ip')
-                                        public_port = port_info.get('publicPort')
-                                        if ip and public_port:
-                                            server_url = f"http://{ip}:{public_port}"
+                                if our_pod:
+                                    runtime = our_pod.get('runtime')
+                                    if runtime:
+                                        ports = runtime.get('ports', [])
+                                        
+                                        # Debug: show what we got
+                                        if attempt == 0 and ports:
+                                            print(f"   DEBUG: Found {len(ports)} port(s)")
+                                        
+                                        # Look for any HTTP port mapping
+                                        for port_info in ports:
+                                            ip = port_info.get('ip')
+                                            public_port = port_info.get('publicPort')
+                                            private_port = port_info.get('privatePort')
+                                            
+                                            # Match port 5000 (our Flask server)
+                                            if private_port == 5000 and ip and public_port:
+                                                server_url = f"http://{ip}:{public_port}"
+                                                break
+                                        
+                                        if server_url:
                                             break
                                 
-                                if server_url:
-                                    break
+                                if attempt % 5 == 0 and attempt > 0:
+                                    print(f"   ... waiting for port {5000} ({attempt*2}s elapsed)")
+                                    
+                            except Exception as e:
+                                if attempt == 0:
+                                    print(f"   DEBUG: Error querying pod: {e}")
                             
                             time.sleep(2)
                         
