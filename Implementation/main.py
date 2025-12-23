@@ -839,6 +839,9 @@ class DGEDashboard:
             print(f"AI   > {output_text}")
             print(f"[Time: {duration*1000:.1f}ms]")
 
+# Backward-compatible alias for tests
+DGELab = DGEDashboard
+
 if __name__ == "__main__":
     db = DGEDashboard()
     db.main_menu()

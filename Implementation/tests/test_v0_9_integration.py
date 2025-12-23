@@ -73,8 +73,8 @@ class TestV09Integration(unittest.TestCase):
         # But wait, train_task wraps the model internally.
         
         # Let's mock the optimizer and loop to avoid real training
-        with patch('dge_training.optim.AdamW'), \
-             patch('dge_training.generate_batch', return_value=(torch.zeros(2,5).long(), torch.zeros(2,5).long())):
+        with patch('core.training.torch.optim.AdamW'), \
+             patch('core.training.generate_batch', return_value=(torch.zeros(2,5).long(), torch.zeros(2,5).long())):
             
             try:
                 # We expect DataParallel to be called
