@@ -1,4 +1,4 @@
-torch>=2.0.0
+# torch is provided by RunPod base image (torch==2.1.0+cu118)
 psutil>=5.9.0
 datasets>=2.14.0
 transformers>=4.30.0
