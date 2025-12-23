@@ -185,10 +185,28 @@ def main():
                 if global_step >= CONFIG["max_steps"]:
                     break
                 
-                # Get inputs
-                input_ids = batch["input_ids"].to(device)
-                targets = input_ids[:, 1:].contiguous()
+                # Handle batch format
+                if isinstance(batch, (list, tuple)):
+                    input_ids, labels = batch
+                    input_ids = input_ids.to(device)
+                    labels = labels.to(device)
+                elif isinstance(batch, dict):
+                    input_ids = batch["input_ids"].to(device)
+                    # TinyStories loader returns full sequence, we need to shift for labels
+                    # If "labels" key exists, use it (e.g., from HF datasets with labels)
+                    if "labels" in batch:
+                        labels = batch["labels"].to(device)
+                    else: 
+                        # Create shifted labels if not provided
+                        labels = input_ids.clone()
+                else:
+                    raise ValueError(f"Unknown batch type: {type(batch)}")
+                
+                # Prepare inputs and targets for the model
+                # inputs are tokens 0 to N-1
+                # targets are tokens 1 to N
                 inputs = input_ids[:, :-1].contiguous()
+                targets = labels[:, 1:].contiguous() # Use the shifted labels
                 
                 # Forward
                 optimizer.zero_grad()
