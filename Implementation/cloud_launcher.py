@@ -66,27 +66,62 @@ def cloud_menu():
                 print("❌ Could not fetch GPU availability.")
                 continue
             
-            # Show top 10 cheapest options by spot price
-            print("\n" + "="*70)
-            print("💰 CHEAPEST AVAILABLE GPUs (sorted by Spot price)")
-            print("="*70)
-            print(f"{'#':<3} | {'GPU':<25} | {'Spot $/hr':<10} | {'VRAM':<8} | {'TFLOPS':<8}")
-            print("-"*70)
+            # Training parameters for cost estimation
+            TOTAL_TOKENS = 3.2e9  # ~100K steps × 32 batch × 1024 seq
+            BASE_TOKENS_PER_SEC = 15000  # RTX 4090 baseline
+            BASE_TFLOPS = 82.6  # RTX 4090 TFLOPS
+            
+            # Show top 10 cheapest options by spot price with cost estimate
+            print("\n" + "="*90)
+            print("💰 CHEAPEST GPUs FOR TINYSTORIES 75M (sorted by total cost)")
+            print("="*90)
+            print(f"{'#':<3} | {'GPU':<22} | {'$/hr':<7} | {'VRAM':<6} | {'Est.Time':<10} | {'Est.Cost':<10}")
+            print("-"*90)
             
             # Sort by spot price (cheapest first)
             available = [g for g in gpus if g.get('communityPrice') and g['communityPrice'] > 0]
-            available.sort(key=lambda x: x['communityPrice'])
             
-            for i, gpu in enumerate(available[:10], 1):
-                name = gpu['name'][:25]
+            # Calculate estimated time and cost for each GPU
+            for gpu in available:
+                # Scale training speed by TFLOPS relative to RTX 4090
+                tflops = gpu['tflops']
+                tokens_per_sec = BASE_TOKENS_PER_SEC * (tflops / BASE_TFLOPS)
+                
+                # Multi-GPU detection (e.g., "2x RTX 4090" -> 2x speed)
+                name = gpu['name']
+                multiplier = 1
+                if name.startswith('2x '):
+                    multiplier = 2
+                elif name.startswith('3x '):
+                    multiplier = 3
+                elif name.startswith('4x '):
+                    multiplier = 4
+                elif name.startswith('8x '):
+                    multiplier = 8
+                
+                tokens_per_sec *= multiplier
+                
+                # Calculate time and cost
+                training_hours = TOTAL_TOKENS / tokens_per_sec / 3600
+                total_cost = training_hours * gpu['communityPrice']
+                
+                gpu['est_hours'] = training_hours
+                gpu['est_cost'] = total_cost
+            
+            # Sort by estimated total cost
+            available.sort(key=lambda x: x.get('est_cost', 9999))
+            
+            for i, gpu in enumerate(available[:15], 1):
+                name = gpu['name'][:22]
                 price = f"${gpu['communityPrice']:.2f}"
                 vram = f"{int(gpu['vram'])} GB"
-                tflops = f"{gpu['tflops']:.1f}"
-                print(f"{i:<3} | {name:<25} | {price:<10} | {vram:<8} | {tflops:<8}")
+                hours = f"{gpu['est_hours']:.0f} hrs"
+                cost = f"${gpu['est_cost']:.0f}"
+                print(f"{i:<3} | {name:<22} | {price:<7} | {vram:<6} | {hours:<10} | {cost:<10}")
             
-            print("-"*70)
-            print("\n💡 Recommendation: 2× RTX 4090 or A40 for best price/performance")
-            print("   Estimated cost: $25-70 depending on GPU choice")
+            print("-"*90)
+            print("💡 Est.Time = based on TFLOPS scaling. Est.Cost = Time × $/hr")
+            print("   Actual time may vary ±30% based on memory bandwidth and batch efficiency.")
             
             confirm = input("\n   Deploy? (y/n): ").strip().lower()
             if confirm == 'y':
