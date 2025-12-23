@@ -95,8 +95,35 @@ def load_model(prefix):
         token=HF_TOKEN
     )
     
+    # Load state dict
+    state_dict = torch.load(weights_file, map_location=DEVICE)
+    
+    # NEW: Handle Architectural Shifting (Legacy Gated Head -> Hierarchical Head)
+    # If checkpoint has 'lm_head.weight' but model expects 'lm_head.base_head.weight'
+    if "lm_head.weight" in state_dict and "lm_head.base_head.weight" not in state_dict:
+        print("   🔍 Remapping legacy lm_head to Hierarchical structure...")
+        new_sd = state_dict.copy()
+        
+        # Map main weights/bias
+        new_sd["lm_head.base_head.weight"] = new_sd.pop("lm_head.weight")
+        if "lm_head.bias" in new_sd:
+            new_sd["lm_head.base_head.bias"] = new_sd.pop("lm_head.bias")
+            
+        # Drop masks and gates that are only in the old MoEGatedLinear head
+        keys_to_drop = [
+            "lm_head.active_mask", "lm_head.frozen_bias_mask", "lm_head.backward_mask",
+            "lm_head.gate_row.old_gate", "lm_head.gate_col.old_gate",
+            "lm_head.gate_row.router.weight", "lm_head.gate_row.router.bias",
+            "lm_head.gate_col.router.weight", "lm_head.gate_col.router.bias"
+        ]
+        for k in keys_to_drop:
+            if k in new_sd:
+                new_sd.pop(k)
+        
+        state_dict = new_sd
+
     # Load
-    model.load_state_dict(torch.load(weights_file, map_location=DEVICE))
+    model.load_state_dict(state_dict)
     model.to(DEVICE)
     model.eval()
     
