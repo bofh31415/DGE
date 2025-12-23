@@ -33,7 +33,6 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.model import DGESimpleTransformer
-from core.training import DGETrainer
 from data.loader import get_dataset
 from utils.model_manager import ModelManager, Diary
 from hf.repo_manager import HFRepoManager
