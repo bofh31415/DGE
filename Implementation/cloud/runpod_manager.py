@@ -328,25 +328,26 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     log_file = "/workspace/startup.log"
     work_dir = "/workspace/DGE/Implementation"
     
-    # Build command based on image type
-    if image_name and "dge-env" in image_name:
-        # custom image: skip system updates and pip install
-        print(f"🐳 Using custom image: {image_name}")
-        install_steps = "echo '=== [Skipping system/pip setup (Docker Image)] ==='"
+    # Build command parts
+    apt_step = ""
+    pip_step = ""
+    
+    if not (image_name and "dge-env" in image_name):
+        # Standard image: Needs system setup and pip install
+        apt_step = "echo '=== [2/6] Updating system ===' && apt-get update -qq && apt-get install -y git -qq && "
+        pip_step = f"echo '=== [4/6] Installing dependencies ===' && cd {work_dir} && pip install --ignore-installed -r requirements.txt && "
     else:
-        # standard image: do full setup
-        install_steps = (
-            f"echo '=== [2/6] Updating system ===' && apt-get update -qq && apt-get install -y git -qq && "
-            f"echo '=== [4/6] Installing dependencies ===' && "
-            f"cd {work_dir} && pip install --ignore-installed -r requirements.txt"
-        )
+        # Custom image: Skip setup
+        apt_step = "echo '=== [Skipping system setup (Docker)] ===' && "
+        pip_step = "echo '=== [Skipping pip install (Docker)] ===' && "
 
-    # Common command parts
+    # Common command parts (Reordered)
     inner_cmd = (
         f"echo '=== [1/6] Starting setup ===' && "
-        f"{install_steps} && "
+        f"{apt_step}"
         f"echo '=== [3/6] Cloning repo ===' && rm -rf /workspace/DGE && "
         f"git clone --depth 1 -b master https://{GIT_TOKEN}@github.com/bofh31415/DGE.git /workspace/DGE && "
+        f"{pip_step}"
         f"echo '=== [5/6] Starting experiment ===' && "
         f"export PYTHONPATH={work_dir}:$PYTHONPATH && "
         f"export HF_TOKEN={HF_TOKEN} && "
