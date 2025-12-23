@@ -342,7 +342,10 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
         pip_step = "echo '=== [Skipping pip install (Docker)] ===' && "
 
     # Common command parts (Reordered)
+    # Common command parts (Reordered)
+    # Wrapped in `(...) || (...)` to catch failures and prevent restart loop
     inner_cmd = (
+        f"("
         f"echo '=== [1/6] Starting setup ===' && "
         f"{apt_step}"
         f"echo '=== [3/6] Cloning repo ===' && rm -rf /workspace/DGE && "
@@ -356,8 +359,8 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
         f"export HF_REPO={repo_name} && "
         f"cd {work_dir} && {command} && "
         f"echo '=== [6/6] Experiment complete ===' {cleanup_step}"
+        f") || (echo '❌ Command Failed. Sleeping for debugging...' && sleep infinity)"
     )
-
 
     
     # Wrap in bash -c for proper execution
