@@ -27,6 +27,19 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 CACHE_DIR = "models/inference_cache"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def check_setup():
+    """Validate environment setup."""
+    if not HF_TOKEN:
+        print("\n❌ HF_TOKEN not set!")
+        print("\n📋 Setup Instructions:")
+        print("   1. Get your token: https://huggingface.co/settings/tokens")
+        print("   2. Set it: export HF_TOKEN=hf_YOUR_TOKEN_HERE")
+        print("   3. Run this script again")
+        print("\n💡 Quick fix:")
+        print("   export HF_TOKEN=hf_xxx && python experiments/pod_inference.py")
+        return False
+    return True
+
 def scan_models():
     """Scan HF repo for available models."""
     print(f"\n🔍 Scanning {HF_REPO}...")
@@ -124,6 +137,10 @@ def main():
     
     print(f"📡 Device: {DEVICE}")
     print(f"🏠 Repo: {HF_REPO}")
+    
+    # Check setup
+    if not check_setup():
+        return
     
     # Scan models
     models = scan_models()
