@@ -159,7 +159,7 @@ def main():
     # ========================================================================
     # TRAINING LOOP
     # ========================================================================
-    print("\n🚀 Starting training...")
+    print("\n🚀 Starting training...", flush=True)
     
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -240,7 +240,7 @@ def main():
                           f"LR: {scheduler.get_last_lr()[0]:.2e} | "
                           f"Tokens: {tokens_seen/1e9:.2f}B | "
                           f"Speed: {tokens_per_sec/1000:.1f}K tok/s | "
-                          f"ETA: {eta_hours:.1f}h")
+                          f"ETA: {eta_hours:.1f}h", flush=True)
                     
                     running_loss = 0.0
                     
@@ -273,7 +273,7 @@ def main():
                             stage_path,
                             f"{CONFIG['family_name']}/{CONFIG['stage_name']}"
                         )
-                        print(f"   ☁️ Uploaded to HuggingFace")
+                        print(f"   ☁️ Uploaded to HuggingFace", flush=True)
                     except Exception as e:
                         print(f"   ⚠️ HF upload failed: {e}")
                     
