@@ -50,17 +50,30 @@ def list_legacy_models():
 
 
 def migrate_model(old_path: str, new_model_name: str, dry_run: bool = True):
-    """Migrate a single model to its own repo."""
-    from huggingface_hub import HfApi, hf_hub_download, create_repo, upload_folder
+    """Migrate a single model to its own repo (ALL files including logs, diary, etc.)."""
+    from huggingface_hub import HfApi, hf_hub_download, create_repo, upload_folder, list_repo_files
     
     api = HfApi(token=HF_TOKEN)
     new_repo_id = get_model_repo_id(new_model_name)
     
-    print(f"\n{'[DRY RUN] ' if dry_run else ''}Migrating: {old_path} -> {new_repo_id}")
+    # First, list all files in the old path to show what will be migrated
+    try:
+        all_legacy_files = list_repo_files(HF_LEGACY_REPO, token=HF_TOKEN)
+        model_files = [f for f in all_legacy_files if f.startswith(old_path)]
+        
+        print(f"\n{'[DRY RUN] ' if dry_run else ''}Migrating: {old_path} -> {new_repo_id}")
+        print(f"   📁 Files to migrate ({len(model_files)}):")
+        for f in model_files[:10]:  # Show first 10
+            print(f"      - {f.replace(old_path + '/', '')}")
+        if len(model_files) > 10:
+            print(f"      ... and {len(model_files) - 10} more files")
+    except Exception as e:
+        print(f"   ⚠️ Could not list files: {e}")
+        model_files = []
     
     if dry_run:
         print(f"   Would create repo: {new_repo_id}")
-        print(f"   Would download from: {HF_LEGACY_REPO}/{old_path}")
+        print(f"   Would download {len(model_files)} files from: {HF_LEGACY_REPO}/{old_path}")
         print(f"   Would upload to: {new_repo_id}")
         return True
     
@@ -69,7 +82,7 @@ def migrate_model(old_path: str, new_model_name: str, dry_run: bool = True):
         create_repo(new_repo_id, token=HF_TOKEN, private=True, exist_ok=True)
         print(f"   ✅ Created repo: {new_repo_id}")
         
-        # 2. Download files from legacy repo
+        # 2. Download ALL files from legacy repo (including logs, diary, etc.)
         local_temp = f"temp_migration/{new_model_name}"
         os.makedirs(local_temp, exist_ok=True)
         
@@ -77,20 +90,32 @@ def migrate_model(old_path: str, new_model_name: str, dry_run: bool = True):
         snapshot_download(
             HF_LEGACY_REPO,
             local_dir=local_temp,
-            allow_patterns=[f"{old_path}/*"],
+            allow_patterns=[f"{old_path}/*", f"{old_path}/**/*"],  # Include nested dirs
             token=HF_TOKEN
         )
-        print(f"   ✅ Downloaded files")
+        print(f"   ✅ Downloaded {len(model_files)} files")
         
-        # 3. Move files to flat structure
+        # 3. Move files to flat structure (keep relative subdirs)
         source_dir = os.path.join(local_temp, old_path)
+        final_dir = f"temp_migration/{new_model_name}_flat"
+        os.makedirs(final_dir, exist_ok=True)
+        
         if os.path.exists(source_dir):
-            for f in os.listdir(source_dir):
-                shutil.move(os.path.join(source_dir, f), os.path.join(local_temp, f))
+            for root, dirs, files in os.walk(source_dir):
+                for f in files:
+                    src_file = os.path.join(root, f)
+                    rel_path = os.path.relpath(src_file, source_dir)
+                    dst_file = os.path.join(final_dir, rel_path)
+                    os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                    shutil.copy2(src_file, dst_file)
+        
+        # Count what we're uploading
+        upload_count = sum(len(files) for _, _, files in os.walk(final_dir))
+        print(f"   📤 Uploading {upload_count} files to {new_repo_id}")
         
         # 4. Upload to new repo (flat structure)
         api.upload_folder(
-            folder_path=local_temp,
+            folder_path=final_dir,
             repo_id=new_repo_id,
             repo_type="model",
             commit_message=f"Migrated from {HF_LEGACY_REPO}/{old_path}"
@@ -99,6 +124,7 @@ def migrate_model(old_path: str, new_model_name: str, dry_run: bool = True):
         
         # 5. Cleanup temp
         shutil.rmtree(local_temp, ignore_errors=True)
+        shutil.rmtree(final_dir, ignore_errors=True)
         
         return True
         
