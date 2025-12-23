@@ -38,10 +38,12 @@ class DGEDashboard:
     def _load_tokenizer(self):
         try:
             from transformers import GPT2Tokenizer
+            print("🔄 Loading tokenizer... (first run may take 1-2 min)", end='', flush=True)
             self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
             self.tokenizer.pad_token = self.tokenizer.eos_token
+            print(" ✅")
         except ImportError:
-            print("⚠️ Transformers not installed. Using mock tokenizer.")
+            print("\n⚠️ Transformers not installed. Using mock tokenizer.")
             self.tokenizer = None
 
     def main_menu(self):
