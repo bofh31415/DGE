@@ -38,6 +38,17 @@ def check_setup():
         print("\n💡 Quick fix:")
         print("   export HF_TOKEN=hf_xxx && python experiments/pod_inference.py")
         return False
+        
+    try:
+        import transformers
+        import accelerate
+    except ImportError:
+        print("\n❌ Missing dependencies: transformers, accelerate")
+        print("\n📋 Fix with:")
+        print("   pip install -r requirements.txt")
+        print("   OR: pip install transformers accelerate")
+        return False
+        
     return True
 
 def scan_models():
@@ -99,17 +110,13 @@ def load_model(prefix):
     state_dict = torch.load(weights_file, map_location=DEVICE)
     
     # NEW: Handle Architectural Shifting (Legacy Gated Head -> Hierarchical Head)
-    # If checkpoint has 'lm_head.weight' but model expects 'lm_head.base_head.weight'
     if "lm_head.weight" in state_dict and "lm_head.base_head.weight" not in state_dict:
         print("   🔍 Remapping legacy lm_head to Hierarchical structure...")
         new_sd = state_dict.copy()
-        
-        # Map main weights/bias
         new_sd["lm_head.base_head.weight"] = new_sd.pop("lm_head.weight")
         if "lm_head.bias" in new_sd:
             new_sd["lm_head.base_head.bias"] = new_sd.pop("lm_head.bias")
             
-        # Drop masks and gates that are only in the old MoEGatedLinear head
         keys_to_drop = [
             "lm_head.active_mask", "lm_head.frozen_bias_mask", "lm_head.backward_mask",
             "lm_head.gate_row.old_gate", "lm_head.gate_col.old_gate",
@@ -119,7 +126,6 @@ def load_model(prefix):
         for k in keys_to_drop:
             if k in new_sd:
                 new_sd.pop(k)
-        
         state_dict = new_sd
 
     # Load
@@ -136,7 +142,7 @@ def generate_text(model, prompt, max_tokens=100):
         from transformers import GPT2Tokenizer
         tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     except:
-        print("❌ transformers not installed")
+        print("\n❌ transformers not installed. Run: pip install transformers accelerate")
         return None
     
     input_ids = tokenizer.encode(prompt, return_tensors="pt").to(DEVICE)
@@ -162,12 +168,12 @@ def main():
 ╚══════════════════════════════════════════════════╝
 """)
     
-    print(f"📡 Device: {DEVICE}")
-    print(f"🏠 Repo: {HF_REPO}")
-    
     # Check setup
     if not check_setup():
         return
+
+    print(f"📡 Device: {DEVICE}")
+    print(f"🏠 Repo: {HF_REPO}")
     
     # Scan models
     models = scan_models()
@@ -207,10 +213,8 @@ def main():
     while True:
         try:
             prompt = input("You: ").strip()
-            
             if prompt.lower() in ['exit', 'quit', 'q']:
                 break
-            
             if not prompt:
                 continue
             
