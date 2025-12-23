@@ -488,8 +488,12 @@ class DGEDashboard:
         
         try:
             # Download to the current models folder
+            from huggingface_hub import snapshot_download
             dest = os.path.join(os.getcwd(), "models")
-            subprocess.run(["huggingface-cli", "download", repo, "--local-dir", dest], check=True)
+            
+            print(f"   Downloading to: {dest}")
+            snapshot_download(repo_id=repo, local_dir=dest, local_dir_use_symlinks=False)
+            
             print("\n✅ Sync Complete! New models available in Local List.")
         except Exception as e:
             print(f"❌ Sync Failed: {e}")
