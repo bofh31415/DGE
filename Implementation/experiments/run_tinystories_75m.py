@@ -58,7 +58,7 @@ CONFIG = {
     "warmup_steps": 2000,
     "max_steps": 100000,
     "eval_interval": 1000,
-    "save_interval": 5000,
+    "save_interval": 1000,  # Save every 1000 steps (~10 min) for spot pod safety!
     "log_interval": 100,
     
     # Data
