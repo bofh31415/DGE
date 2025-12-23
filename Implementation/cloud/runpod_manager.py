@@ -303,7 +303,7 @@ def find_cheapest_gpu(gpu_display_name="NVIDIA GeForce RTX 4090"):
     # Fallback
     return "NVIDIA GeForce RTX 4090", 0.69
 
-def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, is_spot=True, price=None):
+def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, is_spot=True, price=None, image_name=None):
     """
     Deploy a pod, clone the repo, setup env, and run the experiment.
     'Fire and forget' mode.
@@ -328,20 +328,31 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
     log_file = "/workspace/startup.log"
     work_dir = "/workspace/DGE/Implementation"
     
-    # Build command with VERBOSE output to console
+    # Build command based on image type
+    if image_name and "dge-env" in image_name:
+        # custom image: skip system updates and pip install
+        print(f"🐳 Using custom image: {image_name}")
+        install_steps = "echo '=== [Skipping system/pip setup (Docker Image)] ==='"
+    else:
+        # standard image: do full setup
+        install_steps = (
+            f"echo '=== [2/6] Updating system ===' && apt-get update -qq && apt-get install -y git -qq && "
+            f"echo '=== [4/6] Installing dependencies ===' && "
+            f"cd {work_dir} && pip install --ignore-installed -r requirements.txt"
+        )
+
+    # Common command parts
     inner_cmd = (
         f"echo '=== [1/6] Starting setup ===' && "
-        f"echo '=== [2/6] Updating system ===' && apt-get update -qq && apt-get install -y git -qq && "
+        f"{install_steps} && "
         f"echo '=== [3/6] Cloning repo ===' && rm -rf /workspace/DGE && "
         f"git clone --depth 1 -b master https://{GIT_TOKEN}@github.com/bofh31415/DGE.git /workspace/DGE && "
-        f"echo '=== [4/6] Installing dependencies ===' && "
-        f"cd {work_dir} && pip install --ignore-installed -r requirements.txt && "
+        f"echo '=== [5/6] Starting experiment ===' && "
         f"export PYTHONPATH={work_dir}:$PYTHONPATH && "
         f"export HF_TOKEN={HF_TOKEN} && "
         f"export GIT_TOKEN={GIT_TOKEN} && "
         f"export RUNPOD_API_KEY={RUNPOD_API_KEY} && "
         f"export HF_REPO={repo_name} && "
-        f"echo '=== [5/6] Starting experiment ===' && "
         f"cd {work_dir} && {command} && "
         f"echo '=== [6/6] Experiment complete ===' {cleanup_step}"
     )
@@ -374,7 +385,7 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
             "gpuCount": gpu_count,
             "gpuTypeId": gpu_type,
             "cloudType": "COMMUNITY" if is_spot else "SECURE",
-            "imageName": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+            "imageName": image_name if image_name else "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
             "containerDiskInGb": 40,
             "volumeInGb": 40,
             "volumeMountPath": "/workspace",

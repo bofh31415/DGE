@@ -138,13 +138,18 @@ def cloud_menu():
                     print(f"\n   ✅ Selected: {selected['name']} @ ${price:.2f}/hr")
                     print(f"      Est. Time: {selected['est_hours']:.0f} hrs | Est. Cost: ${selected['est_cost']:.0f}")
                     
+                    # Docker Image Selection
+                    use_docker = input("\n   🐳 Use optimized DGE Docker image (faster startup)? (y/n) [y]: ").strip().lower()
+                    image_name = "darealsven/dge-env:latest" if use_docker in ['', 'y'] else None
+                    
                     confirm = input("\n   Deploy training? (y/n): ").strip().lower()
                     if confirm == 'y':
                         rpm.deploy_experiment(
                             "python experiments/run_tinystories_75m.py",
                             gpu_type=gpu_id,
                             is_spot=True,
-                            price=price
+                            price=price,
+                            image_name=image_name
                         )
             except ValueError:
                 print("   Invalid selection")
