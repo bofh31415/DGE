@@ -68,10 +68,10 @@ CONFIG = {
     # Targets
     "target_loss": 2.0,  # Stop early if reached
     
-    # Naming
+    # Naming - V 0.2.0: Per-model HF repo
+    "model_name": "tinystories-75m",  # Used for HF repo: darealSven/dge-tinystories-75m
     "family_name": "tinystories_75m",
     "stage_name": "full_training",
-    "hf_repo": os.getenv("HF_REPO", "darealSven/dge"),
 }
 
 # ============================================================================
@@ -98,7 +98,7 @@ def main():
     
     # Initialize managers
     mgr = ModelManager()
-    hf_mgr = HFRepoManager(CONFIG["hf_repo"])
+    hf_mgr = HFRepoManager(CONFIG["model_name"])  # V 0.2.0: Per-model repo
     
     # Create model directory
     family_path = os.path.join("models", CONFIG["family_name"])

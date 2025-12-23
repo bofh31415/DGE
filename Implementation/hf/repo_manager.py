@@ -1,23 +1,18 @@
 """
-Unified HuggingFace Repository Manager (V 0.1.0)
+Unified HuggingFace Repository Manager (V 0.2.0)
 ================================================
-Centralized management for HF uploads/downloads with standard structure.
+Centralized management for HF uploads/downloads with per-model repos.
 
-Structure:
-    darealSven/dge-models/
-    ├── shared_bases/{dataset}_{d_model}_{n_head}head_{n_layer}layer/
-    ├── {experiment_name}/
-    │   ├── milestone_*/
-    │   ├── resume_checkpoint/
-    │   ├── logs/
-    │   └── experiment_results.json
+V 0.2.0: One repo per model for better organization
+  - darealSven/dge-tinystories-75m
+  - darealSven/dge-tinystories-575m
+  - darealSven/dge-tinystories-gsm8k
 
 Usage:
     from hf.repo_manager import HFRepoManager
     
-    manager = HFRepoManager("tinystories_gsm8k")
-    manager.upload_checkpoint("models/exp/checkpoint", step=1000, is_milestone=True)
-    manager.upload_logs("models/exp/logs")
+    manager = HFRepoManager("tinystories-75m")  # Creates darealSven/dge-tinystories-75m
+    manager.upload_checkpoint("models/exp/checkpoint", step=1000)
 """
 
 import os
@@ -28,8 +23,12 @@ import queue
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-# Central HF repository for all DGE models
-HF_REPO = "darealSven/dge"
+# Base namespace for all DGE models
+HF_NAMESPACE = "darealSven"
+HF_PREFIX = "dge"
+
+# Legacy repo (for migration/fallback)
+HF_LEGACY_REPO = "darealSven/dge"
 
 # Background upload queue
 _upload_queue = queue.Queue()
@@ -37,28 +36,37 @@ _upload_worker_running = False
 _upload_thread = None
 
 
+def get_model_repo_id(model_name: str) -> str:
+    """Generate HF repo ID for a model. E.g., 'tinystories-75m' -> 'darealSven/dge-tinystories-75m'"""
+    # Normalize: replace underscores with dashes for HF compatibility
+    normalized = model_name.replace("_", "-").lower()
+    return f"{HF_NAMESPACE}/{HF_PREFIX}-{normalized}"
+
+
 class HFRepoManager:
     """
     Unified HuggingFace repository manager for DGE experiments.
     
+    V 0.2.0: One repo per model family.
+    
     Handles:
+    - Per-model repo creation
     - Checkpoint uploads with proper folder structure
     - Log file uploads
-    - Shared base model management
     - Background uploading
     """
     
-    def __init__(self, experiment_name: str, hf_token: Optional[str] = None):
+    def __init__(self, model_name: str, hf_token: Optional[str] = None):
         """
-        Initialize manager for an experiment.
+        Initialize manager for a model.
         
         Args:
-            experiment_name: Name of experiment (e.g., "tinystories_gsm8k")
+            model_name: Name of model (e.g., "tinystories-75m", "tinystories-gsm8k")
             hf_token: HuggingFace token (defaults to HF_TOKEN env var)
         """
-        self.experiment_name = experiment_name
+        self.model_name = model_name
         self.hf_token = hf_token or os.environ.get("HF_TOKEN")
-        self.repo_id = HF_REPO
+        self.repo_id = get_model_repo_id(model_name)
         self._api = None
         
     @property
@@ -111,10 +119,11 @@ class HFRepoManager:
         Returns:
             True if upload queued/started successfully
         """
+        # V 0.2.0: Flat structure in per-model repo
         if is_milestone:
-            hf_path = f"{self.experiment_name}/milestone_{checkpoint_type}"
+            hf_path = f"checkpoints/milestone_{checkpoint_type}"
         else:
-            hf_path = f"{self.experiment_name}/resume_checkpoint"
+            hf_path = "checkpoints/resume"
         
         if background:
             _upload_queue.put((local_path, hf_path, step, self))
@@ -131,7 +140,7 @@ class HFRepoManager:
             local_log_dir: Directory containing log files
             background: Upload in background
         """
-        hf_path = f"{self.experiment_name}/logs"
+        hf_path = "logs"
         
         if background:
             _upload_queue.put((local_log_dir, hf_path, 0, self))
@@ -149,10 +158,10 @@ class HFRepoManager:
             self._ensure_repo_exists()
             self.api.upload_file(
                 path_or_fileobj=results_file,
-                path_in_repo=f"{self.experiment_name}/experiment_results.json",
+                path_in_repo="experiment_results.json",
                 repo_id=self.repo_id,
                 repo_type="model",
-                commit_message=f"Results: {self.experiment_name}"
+                commit_message=f"Results: {self.model_name}"
             )
             return True
         except Exception as e:
