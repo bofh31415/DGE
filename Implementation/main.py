@@ -196,6 +196,7 @@ class DGEDashboard:
             print("3. Terminate Pod")
             print("4. Watch Progress (live updates)")
             print("5. Remote Inference (List/Run HF Models)")
+            print("6. 🆕 Train TinyStories 75M (~$25-70)")
             print("b. Back")
             
             choice = input("\nSelect Option: ").strip().lower()
@@ -210,6 +211,8 @@ class DGEDashboard:
                 self.remote_inference_ui()
             if choice == '2':
                 self.deploy_ui()
+            if choice == '6':
+                self.train_tinystories_75m_ui()
 
     def watch_pod_progress(self):
         """Live monitoring of pod progress with GPU utilization."""
@@ -265,6 +268,84 @@ class DGEDashboard:
         
         input("\nPress Enter...")
 
+    def train_tinystories_75m_ui(self):
+        """UI for training TinyStories 75M with GPU cost estimation."""
+        import cloud.runpod_manager as runpod_manager
+        
+        self.clear_screen()
+        print(TITLE)
+        print("--- TRAIN TINYSTORIES 75M ---\n")
+        print("🧠 75M params | ~100K steps | Target loss < 2.0")
+        
+        print("\n⏳ Checking GPU availability...")
+        gpus = runpod_manager.get_available_gpus()
+        
+        if not gpus:
+            print("❌ Could not fetch GPU availability.")
+            input("\nPress Enter...")
+            return
+        
+        # Training parameters for cost estimation
+        TOTAL_TOKENS = 3.2e9  # ~100K steps × 32 batch × 1024 seq
+        BASE_TOKENS_PER_SEC = 15000  # RTX 4090 baseline
+        BASE_TFLOPS = 82.6  # RTX 4090 TFLOPS
+        
+        # Filter available spot GPUs and calculate costs
+        available = [g for g in gpus if g.get('communityPrice') and g['communityPrice'] > 0]
+        
+        for gpu in available:
+            tflops = gpu['tflops']
+            tokens_per_sec = BASE_TOKENS_PER_SEC * (tflops / BASE_TFLOPS)
+            
+            # Multi-GPU detection
+            name = gpu['name']
+            if name.startswith('2x '): tokens_per_sec *= 2
+            elif name.startswith('3x '): tokens_per_sec *= 3
+            elif name.startswith('4x '): tokens_per_sec *= 4
+            elif name.startswith('8x '): tokens_per_sec *= 8
+            
+            training_hours = TOTAL_TOKENS / tokens_per_sec / 3600
+            total_cost = training_hours * gpu['communityPrice']
+            gpu['est_hours'] = training_hours
+            gpu['est_cost'] = total_cost
+        
+        # Sort by total cost
+        available.sort(key=lambda x: x.get('est_cost', 9999))
+        
+        # Display top 15
+        print("\n" + "="*80)
+        print("💰 CHEAPEST GPUs FOR TINYSTORIES 75M (sorted by total cost)")
+        print("="*80)
+        print(f"{'#':<3} | {'GPU':<22} | {'$/hr':<7} | {'VRAM':<6} | {'Time':<8} | {'Cost':<8}")
+        print("-"*80)
+        
+        for i, gpu in enumerate(available[:15], 1):
+            name = gpu['name'][:22]
+            price = f"${gpu['communityPrice']:.2f}"
+            vram = f"{int(gpu['vram'])} GB"
+            hours = f"{gpu['est_hours']:.0f}h"
+            cost = f"${gpu['est_cost']:.0f}"
+            print(f"{i:<3} | {name:<22} | {price:<7} | {vram:<6} | {hours:<8} | {cost:<8}")
+        
+        print("-"*80)
+        print("💡 Saves to HF every 1000 steps (~10 min). Safe for spot pods!")
+        
+        confirm = input("\n   Deploy training? (y/n): ").strip().lower()
+        if confirm == 'y':
+            gpu_id, is_spot, cost = runpod_manager.select_gpu_interactive()
+            if gpu_id:
+                try:
+                    runpod_manager.deploy_experiment(
+                        "python experiments/run_tinystories_75m.py",
+                        gpu_type=gpu_id,
+                        is_spot=is_spot,
+                        price=cost
+                    )
+                    print("\n✅ Training deployed! Use 'Watch Progress' to monitor.")
+                except Exception as e:
+                    print(f"\n❌ Deployment failed: {e}")
+        
+        input("\nPress Enter...")
 
     def remote_inference_ui(self):
         """UI for listing HF models and deploying inference server on RunPod."""
