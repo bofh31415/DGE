@@ -325,7 +325,7 @@ class DGEDashboard:
                         pod_id = runpod_manager.deploy_experiment("python experiments/run_global_inference.py --server")
                         
                         # Wait for pod to be running and get address
-                        print("\n⏳ Waiting for server to start...")
+                        print("\n⏳ Waiting for pod deployment...")
                         time.sleep(10)  # Initial wait
                         
                         server_url = None
@@ -357,21 +357,27 @@ class DGEDashboard:
                             input("\nPress Enter...")
                             return
                         
-                        # Test connection
+                        # Test connection - pip install takes 2-3 minutes!
                         print(f"\n🔗 Server: {server_url}")
-                        print("   Testing connection...")
+                        print("   ⏳ Waiting for pip install to complete (~3 min)...")
                         
-                        for _ in range(10):
+                        connected = False
+                        for attempt in range(60):  # Try for 3 minutes (60 * 3s = 180s)
                             try:
                                 resp = requests.get(f"{server_url}/health", timeout=5)
                                 if resp.status_code == 200:
-                                    print("   ✅ Connected!")
+                                    print(f"   ✅ Connected after {attempt*3}s!")
+                                    connected = True
                                     break
                             except:
+                                if attempt % 10 == 0 and attempt > 0:
+                                    print(f"   ... still waiting ({attempt*3}s elapsed)")
                                 time.sleep(3)
-                        else:
-                            print("\n⚠️ Server not responding. It may still be starting up.")
-                            print(f"   Try manually: curl {server_url}/health")
+                        
+                        if not connected:
+                            print("\n⚠️ Server not responding after 3 minutes.")
+                            print("   The server might still be starting. Check RunPod logs.")
+                            print(f"   Try later: curl {server_url}/health")
                             input("\nPress Enter...")
                             return
                         
