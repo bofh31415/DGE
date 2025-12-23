@@ -193,6 +193,7 @@ class DGEDashboard:
             print("2. Deploy Single Experiment")
             print("3. Terminate Pod")
             print("4. Watch Progress (live updates)")
+            print("5. Remote Inference (List/Run HF Models)")
             print("b. Back")
             
             choice = input("\nSelect Option: ").strip().lower()
@@ -203,6 +204,8 @@ class DGEDashboard:
                 if pid: runpod_manager.terminate_pod(pid); time.sleep(1)
             if choice == '4':
                 self.watch_pod_progress()
+            if choice == '5':
+                self.remote_inference_ui()
             if choice == '2':
                 self.deploy_ui()
 
@@ -259,6 +262,84 @@ class DGEDashboard:
             print("\n\n✅ Watch mode stopped.")
         
         input("\nPress Enter...")
+
+    def remote_inference_ui(self):
+        """UI for listing HF models and deploying inference on RunPod."""
+        import cloud.runpod_manager as runpod_manager
+        from huggingface_hub import HfApi
+        import os
+        
+        self.clear_screen()
+        print(TITLE)
+        print("--- REMOTE INFERENCE: HuggingFace Models ---\n")
+        
+        hf_repo = "darealSven/dge"
+        hf_token = os.getenv("HF_TOKEN")
+        
+        print(f"🔍 Scanning {hf_repo}...")
+        try:
+            api = HfApi(token=hf_token)
+            files = api.list_repo_files(hf_repo, token=hf_token)
+            
+            # Find model directories (contain config.json + weights.pt)
+            configs = {f for f in files if f.endswith("/config.json") or f == "config.json"}
+            weights = {f for f in files if f.endswith("/weights.pt") or f == "weights.pt"}
+            
+            models = []
+            if "config.json" in configs and "weights.pt" in weights:
+                models.append(".")
+            for cfg in configs:
+                prefix = os.path.dirname(cfg)
+                if prefix and f"{prefix}/weights.pt" in weights:
+                    models.append(prefix)
+            models.sort()
+            
+            if not models:
+                print("❌ No valid models found in HF repo.")
+                input("\nPress Enter...")
+                return
+            
+            print(f"\n✅ Found {len(models)} models:\n")
+            for i, m in enumerate(models):
+                display_name = m if m != "." else "(root)"
+                print(f"  {i+1}. {display_name}")
+            
+            print("\nOptions:")
+            print("1. Deploy Interactive Inference to RunPod")
+            print("2. Run Automated Suite on ALL models (RunPod)")
+            print("b. Back")
+            
+            choice = input("\nSelect: ").strip().lower()
+            
+            if choice == 'b':
+                return
+            elif choice == '1':
+                # Deploy the global inference script to RunPod
+                confirm = input("\n🚀 Deploy interactive inference to RunPod? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    try:
+                        runpod_manager.deploy_experiment("python experiments/run_global_inference.py")
+                        print("\n✅ Deployed! Access via SSH to interact with models.")
+                        print("   ssh <pod-id>@ssh.runpod.io")
+                    except Exception as e:
+                        if "does not have the resources" in str(e):
+                            print("\n❌ GPU out of capacity. Try Cloud Ops → Deploy for other GPUs.")
+                        else:
+                            print(f"\n❌ Deployment failed: {e}")
+            elif choice == '2':
+                confirm = input("\n🚀 Run automated suite on ALL models? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    try:
+                        # Run with --auto flag 
+                        runpod_manager.deploy_experiment("python experiments/run_global_inference.py --auto")
+                        print("\n✅ Deployed! Results will be saved to global_inference_report.md")
+                    except Exception as e:
+                        print(f"\n❌ Deployment failed: {e}")
+                        
+        except Exception as e:
+            print(f"❌ Error accessing HuggingFace: {e}")
+        
+        input("\nPress Enter to return...")
 
 
     def remote_chat_ui(self):

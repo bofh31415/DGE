@@ -274,4 +274,16 @@ def main_menu():
             print("Invalid Option")
 
 if __name__ == "__main__":
-    main_menu()
+    import argparse
+    parser = argparse.ArgumentParser(description="Global Model Inference")
+    parser.add_argument("--auto", action="store_true", help="Run automated suite without interaction")
+    args = parser.parse_args()
+    
+    if args.auto:
+        prefixes = scan_repository()
+        if prefixes:
+            run_automated_suite(prefixes)
+        else:
+            print("No models found.")
+    else:
+        main_menu()
