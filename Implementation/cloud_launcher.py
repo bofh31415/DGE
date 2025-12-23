@@ -56,12 +56,40 @@ def cloud_menu():
         elif choice == '6':
             print("\n🧠 TinyStories 75M Training")
             print("   75M params | ~100K steps | Target loss < 2.0")
-            print("\n   Estimated costs:")
-            print("   - 2× RTX 4090: ~$25-35 (30-40 hrs)")
-            print("   - 1× L40S:     ~$50-70 (60-80 hrs)")
+            
+            # Query available GPUs
+            import cloud.runpod_manager as rpm
+            print("\n⏳ Checking GPU availability...")
+            gpus = rpm.get_available_gpus()
+            
+            if not gpus:
+                print("❌ Could not fetch GPU availability.")
+                continue
+            
+            # Show top 10 cheapest options by spot price
+            print("\n" + "="*70)
+            print("💰 CHEAPEST AVAILABLE GPUs (sorted by Spot price)")
+            print("="*70)
+            print(f"{'#':<3} | {'GPU':<25} | {'Spot $/hr':<10} | {'VRAM':<8} | {'TFLOPS':<8}")
+            print("-"*70)
+            
+            # Sort by spot price (cheapest first)
+            available = [g for g in gpus if g.get('communityPrice') and g['communityPrice'] > 0]
+            available.sort(key=lambda x: x['communityPrice'])
+            
+            for i, gpu in enumerate(available[:10], 1):
+                name = gpu['name'][:25]
+                price = f"${gpu['communityPrice']:.2f}"
+                vram = f"{int(gpu['vram'])} GB"
+                tflops = f"{gpu['tflops']:.1f}"
+                print(f"{i:<3} | {name:<25} | {price:<10} | {vram:<8} | {tflops:<8}")
+            
+            print("-"*70)
+            print("\n💡 Recommendation: 2× RTX 4090 or A40 for best price/performance")
+            print("   Estimated cost: $25-70 depending on GPU choice")
+            
             confirm = input("\n   Deploy? (y/n): ").strip().lower()
             if confirm == 'y':
-                import cloud.runpod_manager as rpm
                 gpu_id, is_spot, cost = rpm.select_gpu_interactive()
                 if gpu_id:
                     rpm.deploy_experiment(
