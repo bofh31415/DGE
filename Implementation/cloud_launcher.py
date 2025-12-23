@@ -139,8 +139,8 @@ def cloud_menu():
                     print(f"      Est. Time: {selected['est_hours']:.0f} hrs | Est. Cost: ${selected['est_cost']:.0f}")
                     
                     # Docker Image Selection
-                    use_docker = input("\n   🐳 Use optimized DGE Docker image (faster startup)? (y/n) [y]: ").strip().lower()
-                    image_name = "darealsven/dge-env:latest" if use_docker in ['', 'y'] else None
+                    use_docker = input("\n   🐳 Use optimized DGE Docker image (faster startup)? (y/n) [n]: ").strip().lower()
+                    image_name = "darealsven/dge-env:latest" if use_docker == 'y' else None
                     
                     confirm = input("\n   Deploy training? (y/n): ").strip().lower()
                     if confirm == 'y':
