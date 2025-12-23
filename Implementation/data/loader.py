@@ -542,9 +542,13 @@ def load_tinystories(split='train', max_samples=None, seq_len=128, batch_size=32
     print(f"📝 Extracting {len(dataset)} texts...", flush=True)
     texts = [item['text'] for item in dataset]
     print(f"   ✓ Text extraction complete", flush=True)
+    
+    print(f"🔧 Creating TextDataset (seq_len={seq_len})...", flush=True)
     torch_dataset = TextDataset(texts, tokenizer, seq_len, vocab_size)
+    print(f"   ✓ TextDataset created: {len(torch_dataset)} samples", flush=True)
     
     # Create dataloader
+    print(f"🔧 Creating DataLoader (batch_size={batch_size})...", flush=True)
     dataloader = DataLoader(
         torch_dataset, 
         batch_size=batch_size, 
@@ -552,8 +556,9 @@ def load_tinystories(split='train', max_samples=None, seq_len=128, batch_size=32
         num_workers=0,
         pin_memory=True
     )
+    print(f"   ✓ DataLoader created: {len(dataloader)} batches", flush=True)
     
-    print(f"✅ Loaded {len(torch_dataset)} samples, {len(dataloader)} batches")
+    print(f"✅ Loaded {len(torch_dataset)} samples, {len(dataloader)} batches", flush=True)
     return dataloader
 
 
