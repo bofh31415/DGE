@@ -278,6 +278,22 @@ class DGEDashboard:
         print("🧠 75M params | ~100K steps | Target loss < 2.0")
         
         print("\n⏳ Checking GPU availability...")
+    
+        # Check for existing pods first
+        active_pods = runpod_manager.list_pods()
+        if active_pods:
+            print(f"\n⚠️  FOUND {len(active_pods)} ACTIVE PODS:")
+            for p in active_pods:
+                print(f"   - {p['id']} ({p['status']}) - {p['gpuTypeId']}")
+            
+            print("\n   If an installation is broken, it is safer to TERMINATE and START FRESH.")
+            action = input("   Terminate all active pods before deploying? (y/n) [y]: ").strip().lower()
+            if action in ['', 'y']:
+                print("   🧨 Terminating pods...")
+                for p in active_pods:
+                    runpod_manager.terminate_pod(p['id'])
+                time.sleep(2) # Wait for cleanup
+                
         gpus = runpod_manager.get_available_gpus()
         
         if not gpus:

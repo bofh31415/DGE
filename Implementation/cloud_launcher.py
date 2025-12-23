@@ -60,6 +60,23 @@ def cloud_menu():
             # Query available GPUs
             import cloud.runpod_manager as rpm
             print("\n⏳ Checking GPU availability...")
+            
+            # Check for existing pods first
+            active_pods = rpm.list_pods()
+            if active_pods:
+                print(f"\n⚠️  FOUND {len(active_pods)} ACTIVE PODS:")
+                for p in active_pods:
+                    print(f"   - {p['id']} ({p['status']}) - {p['gpuTypeId']}")
+                
+                print("\n   If an installation is broken, it is safer to TERMINATE and START FRESH.")
+                action = input("   Terminate all active pods before deploying? (y/n) [y]: ").strip().lower()
+                if action in ['', 'y']:
+                    print("   🧨 Terminating pods...")
+                    for p in active_pods:
+                        rpm.terminate_pod(p['id'])
+                    import time
+                    time.sleep(2) # Wait for cleanup
+            
             gpus = rpm.get_available_gpus()
             
             if not gpus:
