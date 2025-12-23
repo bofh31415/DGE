@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.model import DGESimpleTransformer
-from data.loader import get_dataset
+from data.loader import load_tinystories
 from utils.model_manager import ModelManager, Diary
 from hf.repo_manager import HFRepoManager
 
@@ -143,16 +143,14 @@ def main():
     # LOAD DATA
     # ========================================================================
     print("\n📚 Loading TinyStories dataset...")
-    from transformers import GPT2Tokenizer
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    tokenizer.pad_token = tokenizer.eos_token
-    
-    train_loader = get_dataset(
-        CONFIG["dataset"],
+    train_loader = load_tinystories(
         split=CONFIG["split"],
+        max_samples=None,  # Use full dataset
+        seq_len=CONFIG["max_seq_len"],
         batch_size=CONFIG["batch_size"],
-        max_length=CONFIG["max_seq_len"],
-        tokenizer=tokenizer
+        tokenizer_name='gpt2',
+        vocab_size=CONFIG["vocab_size"],
+        shuffle=True
     )
     
     # ========================================================================
