@@ -109,6 +109,33 @@ def migrate_model(old_path: str, new_model_name: str, dry_run: bool = True):
                     os.makedirs(os.path.dirname(dst_file), exist_ok=True)
                     shutil.copy2(src_file, dst_file)
         
+        # 3b. Extract ZIP chunks if present -> single weights.pt
+        chunk_files = sorted([f for f in os.listdir(final_dir) if f.startswith("checkpoint_archive.zip.")])
+        if chunk_files:
+            print(f"   📦 Extracting {len(chunk_files)} ZIP chunks...")
+            import zipfile
+            
+            # Combine chunks
+            combined_path = os.path.join(final_dir, "combined.zip")
+            with open(combined_path, "wb") as combined:
+                for chunk in chunk_files:
+                    chunk_path = os.path.join(final_dir, chunk)
+                    with open(chunk_path, "rb") as cf:
+                        combined.write(cf.read())
+            
+            # Extract
+            try:
+                with zipfile.ZipFile(combined_path, "r") as zf:
+                    zf.extractall(final_dir)
+                print(f"   ✅ Extracted to weights.pt")
+                
+                # Cleanup chunks and combined zip
+                for chunk in chunk_files:
+                    os.remove(os.path.join(final_dir, chunk))
+                os.remove(combined_path)
+            except Exception as e:
+                print(f"   ⚠️ Extraction failed: {e}")
+        
         # Count what we're uploading
         upload_count = sum(len(files) for _, _, files in os.walk(final_dir))
         print(f"   📤 Uploading {upload_count} files to {new_repo_id}")
