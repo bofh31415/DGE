@@ -136,8 +136,8 @@ def load_model(prefix):
     print(f"✅ Loaded on {DEVICE}")
     return model, config
 
-def generate_text(model, prompt, max_tokens=100):
-    """Generate text from prompt."""
+def generate_text(model, prompt, max_tokens=100, temperature=0.8, top_k=50):
+    """Generate text from prompt with sampling."""
     try:
         from transformers import GPT2Tokenizer
         tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
@@ -152,14 +152,23 @@ def generate_text(model, prompt, max_tokens=100):
         for _ in range(max_tokens):
             ctx = generated[:, -model.max_seq_len:]
             logits, _ = model(ctx)
-            next_token_logits = logits[:, -1, :]
-            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(0)
+            next_token_logits = logits[:, -1, :] / temperature
+            
+            # Top-k filtering
+            if top_k > 0:
+                indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
+                next_token_logits[indices_to_remove] = -float('Inf')
+            
+            # Sample from distribution
+            probs = torch.softmax(next_token_logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
             generated = torch.cat([generated, next_token], dim=1)
             
             if next_token.item() == tokenizer.eos_token_id:
                 break
     
     return tokenizer.decode(generated[0], skip_special_tokens=True)
+
 
 def main():
     print("""
