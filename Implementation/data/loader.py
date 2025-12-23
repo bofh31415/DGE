@@ -525,16 +525,23 @@ def load_tinystories(split='train', max_samples=None, seq_len=128, batch_size=32
     
     # Load tokenizer
     if TOKENIZER_AVAILABLE and tokenizer_name:
-        print(f"🔤 Loading tokenizer: {tokenizer_name}")
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+        print(f"🔤 Loading tokenizer: {tokenizer_name}", flush=True)
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            print(f"   ✓ Tokenizer loaded successfully", flush=True)
+        except Exception as e:
+            print(f"   ❌ Tokenizer failed: {e}", flush=True)
+            tokenizer = None
     else:
         tokenizer = None
-        print("⚠️ Using fallback character-level tokenization")
+        print("⚠️ Using fallback character-level tokenization", flush=True)
     
-    # Create dataset
+    # Create dataset - add progress indicator
+    print(f"📝 Extracting {len(dataset)} texts...", flush=True)
     texts = [item['text'] for item in dataset]
+    print(f"   ✓ Text extraction complete", flush=True)
     torch_dataset = TextDataset(texts, tokenizer, seq_len, vocab_size)
     
     # Create dataloader
