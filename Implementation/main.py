@@ -263,11 +263,14 @@ class DGEDashboard:
         
         input("\nPress Enter...")
 
+
     def remote_inference_ui(self):
-        """UI for listing HF models and deploying inference on RunPod."""
+        """UI for listing HF models and deploying inference server on RunPod."""
         import cloud.runpod_manager as runpod_manager
         from huggingface_hub import HfApi
         import os
+        import requests
+        import time
         
         self.clear_screen()
         print(TITLE)
@@ -305,8 +308,8 @@ class DGEDashboard:
                 print(f"  {i+1}. {display_name}")
             
             print("\nOptions:")
-            print("1. Deploy Interactive Inference to RunPod")
-            print("2. Run Automated Suite on ALL models (RunPod)")
+            print("1. 🚀 Deploy Interactive Server (Chat in Terminal)")
+            print("2. 📊 Run Automated Suite on ALL models (RunPod)")
             print("b. Back")
             
             choice = input("\nSelect: ").strip().lower()
@@ -314,30 +317,168 @@ class DGEDashboard:
             if choice == 'b':
                 return
             elif choice == '1':
-                # Deploy the global inference script to RunPod
-                confirm = input("\n🚀 Deploy interactive inference to RunPod? (y/n): ").strip().lower()
+                # Deploy server and start interactive chat
+                confirm = input("\n🚀 Deploy inference server to RunPod? (y/n): ").strip().lower()
                 if confirm == 'y':
                     try:
-                        runpod_manager.deploy_experiment("python experiments/run_global_inference.py")
-                        print("\n✅ Deployed! Access via SSH to interact with models.")
-                        print("   ssh <pod-id>@ssh.runpod.io")
+                        print("\n📦 Deploying inference server...")
+                        pod_id = runpod_manager.deploy_experiment("python experiments/run_global_inference.py --server")
+                        
+                        # Wait for pod to be running and get address
+                        print("\n⏳ Waiting for server to start...")
+                        time.sleep(10)  # Initial wait
+                        
+                        server_url = None
+                        for attempt in range(30):  # Try for ~1 minute
+                            pods = runpod_manager.list_pods()
+                            our_pod = next((p for p in pods if p['id'] == pod_id), None)
+                            
+                            if our_pod and our_pod.get('status') == 'RUNNING':
+                                # Get port mapping
+                                runtime = our_pod.get('runtime', {})
+                                ports = runtime.get('ports', [])
+                                
+                                if ports:
+                                    # Find the 5000 HTTP port mapping
+                                    for port_info in ports:
+                                        ip = port_info.get('ip')
+                                        public_port = port_info.get('publicPort')
+                                        if ip and public_port:
+                                            server_url = f"http://{ip}:{public_port}"
+                                            break
+                                
+                                if server_url:
+                                    break
+                            
+                            time.sleep(2)
+                        
+                        if not server_url:
+                            print("\n❌ Could not get server address. Check RunPod console.")
+                            input("\nPress Enter...")
+                            return
+                        
+                        # Test connection
+                        print(f"\n🔗 Server: {server_url}")
+                        print("   Testing connection...")
+                        
+                        for _ in range(10):
+                            try:
+                                resp = requests.get(f"{server_url}/health", timeout=5)
+                                if resp.status_code == 200:
+                                    print("   ✅ Connected!")
+                                    break
+                            except:
+                                time.sleep(3)
+                        else:
+                            print("\n⚠️ Server not responding. It may still be starting up.")
+                            print(f"   Try manually: curl {server_url}/health")
+                            input("\nPress Enter...")
+                            return
+                        
+                        # Interactive chat loop
+                        self.remote_chat_with_server(server_url, models)
+                        
                     except Exception as e:
                         if "does not have the resources" in str(e):
                             print("\n❌ GPU out of capacity. Try Cloud Ops → Deploy for other GPUs.")
                         else:
                             print(f"\n❌ Deployment failed: {e}")
+                        input("\nPress Enter...")
+                        
             elif choice == '2':
                 confirm = input("\n🚀 Run automated suite on ALL models? (y/n): ").strip().lower()
                 if confirm == 'y':
                     try:
-                        # Run with --auto flag 
                         runpod_manager.deploy_experiment("python experiments/run_global_inference.py --auto")
                         print("\n✅ Deployed! Results will be saved to global_inference_report.md")
                     except Exception as e:
                         print(f"\n❌ Deployment failed: {e}")
+                    input("\nPress Enter...")
                         
         except Exception as e:
             print(f"❌ Error accessing HuggingFace: {e}")
+            input("\nPress Enter...")
+
+    def remote_chat_with_server(self, server_url, models):
+        """Interactive chat with remote inference server."""
+        import requests
+        
+        print("\n" + "="*60)
+        print("💬 REMOTE CHAT MODE")
+        print("="*60)
+        
+        # Select model
+        print("\nSelect a model to load:")
+        for i, m in enumerate(models):
+            display_name = m if m != "." else "(root)"
+            print(f"  {i+1}. {display_name}")
+        
+        try:
+            choice = int(input("\nModel #: ").strip())
+            if choice < 1 or choice > len(models):
+                print("❌ Invalid selection.")
+                input("\nPress Enter...")
+                return
+            selected_model = models[choice - 1]
+        except:
+            print("❌ Invalid input.")
+            input("\nPress Enter...")
+            return
+        
+        # Load model
+        print(f"\n🔄 Loading {selected_model} on remote server...")
+        try:
+            resp = requests.post(
+                f"{server_url}/load_model",
+                json={"prefix": selected_model},
+                timeout=120  # Model loading can take time
+            )
+            if resp.status_code == 200:
+                print(f"✅ Model loaded: {selected_model}")
+            else:
+                print(f"❌ Load failed: {resp.json().get('message', 'Unknown error')}")
+                input("\nPress Enter...")
+                return
+        except Exception as e:
+            print(f"❌ Request failed: {e}")
+            input("\nPress Enter...")
+            return
+        
+        # Chat loop
+        print("\n💡 Type your prompts below. Type 'exit' or 'quit' to stop.\n")
+        
+        while True:
+            try:
+                user_input = input("You: ").strip()
+                
+                if user_input.lower() in ['exit', 'quit', 'q']:
+                    print("\n👋 Goodbye!")
+                    break
+                
+                if not user_input:
+                    continue
+                
+                # Generate
+                print("   ⏳ Generating...", end='', flush=True)
+                resp = requests.post(
+                    f"{server_url}/generate",
+                    json={"prompt": user_input, "max_tokens": 100},
+                    timeout=60
+                )
+                print("\r", end='')  # Clear "Generating..." line
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data.get('text', '')
+                    print(f"AI:  {text}\n")
+                else:
+                    print(f"❌ Error: {resp.json().get('message', 'Unknown')}\n")
+                    
+            except KeyboardInterrupt:
+                print("\n\n👋 Goodbye!")
+                break
+            except Exception as e:
+                print(f"\n❌ Request failed: {e}\n")
         
         input("\nPress Enter to return...")
 
