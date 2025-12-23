@@ -52,39 +52,76 @@ def check_setup():
     return True
 
 def scan_models():
-    """Scan HF repo for available models."""
-    print(f"\n🔍 Scanning {HF_REPO}...")
+    """Scan HF for available DGE models (both legacy and per-model repos)."""
+    print(f"\n🔍 Scanning for DGE models...")
     try:
         api = HfApi(token=HF_TOKEN)
-        files = api.list_repo_files(HF_REPO, token=HF_TOKEN)
-        
-        configs = {f for f in files if f.endswith("/config.json") or f == "config.json"}
-        weights = {f for f in files if f.endswith("/weights.pt") or f == "weights.pt"}
         
         models = []
-        if "config.json" in configs and "weights.pt" in weights:
-            models.append(".")
-        for cfg in configs:
-            prefix = os.path.dirname(cfg)
-            if prefix and f"{prefix}/weights.pt" in weights:
-                models.append(prefix)
-        models.sort()
+        
+        # V 0.2.0: Scan per-model repos (darealSven/dge-*)
+        try:
+            repos = api.list_models(author="darealSven", search="dge-", token=HF_TOKEN)
+            for repo in repos:
+                repo_id = repo.id
+                if repo_id.startswith("darealSven/dge-"):
+                    try:
+                        files = api.list_repo_files(repo_id, token=HF_TOKEN)
+                        if "weights.pt" in files or "checkpoints/resume/weights.pt" in files:
+                            model_name = repo_id.replace("darealSven/dge-", "")
+                            models.append({"name": model_name, "repo": repo_id, "type": "per-model"})
+                    except:
+                        pass
+        except Exception as e:
+            print(f"   ⚠️ Per-model scan failed: {e}")
+        
+        # Legacy: Scan single repo (darealSven/dge)
+        try:
+            files = api.list_repo_files(HF_REPO, token=HF_TOKEN)
+            configs = {f for f in files if f.endswith("/config.json") or f == "config.json"}
+            weights = {f for f in files if f.endswith("/weights.pt") or f == "weights.pt"}
+            
+            for cfg in configs:
+                prefix = os.path.dirname(cfg)
+                if prefix and f"{prefix}/weights.pt" in weights:
+                    models.append({"name": prefix, "repo": HF_REPO, "type": "legacy"})
+        except Exception as e:
+            print(f"   ⚠️ Legacy scan failed: {e}")
+        
+        
         return models
     except Exception as e:
-        print(f"❌ Error scanning repo: {e}")
+        print(f"❌ Error scanning repos: {e}")
         return []
 
-def load_model(prefix):
-    """Load model from HF."""
-    print(f"\n🔄 Loading {prefix}...")
+def load_model(model_info):
+    """Load model from HF (supports both per-model and legacy repos)."""
+    # Handle both dict (new) and string (legacy) formats
+    if isinstance(model_info, dict):
+        name = model_info["name"]
+        repo = model_info["repo"]
+        model_type = model_info.get("type", "per-model")
+    else:
+        name = model_info
+        repo = HF_REPO
+        model_type = "legacy"
     
-    # Download config
-    config_file = hf_hub_download(
-        HF_REPO,
-        filename=f"{prefix}/config.json" if prefix != "." else "config.json",
-        local_dir=CACHE_DIR,
-        token=HF_TOKEN
-    )
+    print(f"\n🔄 Loading {name} from {repo}...")
+    
+    # Determine file paths based on type
+    if model_type == "per-model":
+        config_path = "config.json"
+        weights_path = "weights.pt"
+        # Try checkpoints/resume for training checkpoints
+        try:
+            config_file = hf_hub_download(repo, "checkpoints/resume/config.json", local_dir=CACHE_DIR, token=HF_TOKEN)
+            weights_path = "checkpoints/resume/weights.pt"
+        except:
+            config_file = hf_hub_download(repo, config_path, local_dir=CACHE_DIR, token=HF_TOKEN)
+    else:
+        config_path = f"{name}/config.json" if name != "." else "config.json"
+        weights_path = f"{name}/weights.pt" if name != "." else "weights.pt"
+        config_file = hf_hub_download(repo, config_path, local_dir=CACHE_DIR, token=HF_TOKEN)
     
     with open(config_file, 'r') as f:
         config = json.load(f)
@@ -99,12 +136,7 @@ def load_model(prefix):
     )
     
     # Download weights
-    weights_file = hf_hub_download(
-        HF_REPO,
-        filename=f"{prefix}/weights.pt" if prefix != "." else "weights.pt",
-        local_dir=CACHE_DIR,
-        token=HF_TOKEN
-    )
+    weights_file = hf_hub_download(repo, weights_path, local_dir=CACHE_DIR, token=HF_TOKEN)
     
     # Load state dict
     state_dict = torch.load(weights_file, map_location=DEVICE)
@@ -182,7 +214,6 @@ def main():
         return
 
     print(f"📡 Device: {DEVICE}")
-    print(f"🏠 Repo: {HF_REPO}")
     
     # Scan models
     models = scan_models()
@@ -192,8 +223,12 @@ def main():
     
     print(f"\n✅ Found {len(models)} models:\n")
     for i, m in enumerate(models, 1):
-        display_name = m if m != "." else "(root)"
-        print(f"  {i}. {display_name}")
+        if isinstance(m, dict):
+            type_tag = "[NEW]" if m.get("type") == "per-model" else "[LEGACY]"
+            print(f"  {i}. {m['name']} {type_tag}")
+        else:
+            display_name = m if m != "." else "(root)"
+            print(f"  {i}. {display_name} [LEGACY]")
     
     # Select model
     try:
