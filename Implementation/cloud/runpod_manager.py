@@ -357,6 +357,7 @@ def deploy_experiment(command, gpu_type=None, gpu_count=1, auto_terminate=True, 
         f"export GIT_TOKEN={GIT_TOKEN} && "
         f"export RUNPOD_API_KEY={RUNPOD_API_KEY} && "
         f"export HF_REPO={repo_name} && "
+        f"export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && "
         f"cd {work_dir} && {command} && "
         f"echo '=== [6/6] Experiment complete ===' {cleanup_step}"
         f") || (echo '❌ Command Failed. Sleeping for debugging...' && sleep infinity)"

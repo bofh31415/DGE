@@ -51,7 +51,10 @@ CONFIG = {
     "max_seq_len": 1024,
     
     # Training
-    "batch_size": 32,
+    
+    # Training
+    "batch_size": 16, # Reduced from 32 for safety on 48GB cards (OOM protection)
+    "gradient_accumulation_steps": 2, # x16 = 32 effective batch size
     "learning_rate": 3e-4,
     "weight_decay": 0.1,
     "warmup_steps": 2000,
