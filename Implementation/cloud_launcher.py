@@ -123,16 +123,31 @@ def cloud_menu():
             print("💡 Est.Time = based on TFLOPS scaling. Est.Cost = Time × $/hr")
             print("   Actual time may vary ±30% based on memory bandwidth and batch efficiency.")
             
-            confirm = input("\n   Deploy? (y/n): ").strip().lower()
-            if confirm == 'y':
-                gpu_id, is_spot, cost = rpm.select_gpu_interactive()
-                if gpu_id:
-                    rpm.deploy_experiment(
-                        "python experiments/run_tinystories_75m.py",
-                        gpu_type=gpu_id,
-                        is_spot=is_spot,
-                        price=cost
-                    )
+            # Direct GPU selection
+            choice = input("\n   Select GPU [1-15] or 'q' to cancel: ").strip().lower()
+            if choice == 'q':
+                continue
+            
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(available[:15]):
+                    selected = available[idx]
+                    gpu_id = selected['id']
+                    price = selected['communityPrice']
+                    
+                    print(f"\n   ✅ Selected: {selected['name']} @ ${price:.2f}/hr")
+                    print(f"      Est. Time: {selected['est_hours']:.0f} hrs | Est. Cost: ${selected['est_cost']:.0f}")
+                    
+                    confirm = input("\n   Deploy training? (y/n): ").strip().lower()
+                    if confirm == 'y':
+                        rpm.deploy_experiment(
+                            "python experiments/run_tinystories_75m.py",
+                            gpu_type=gpu_id,
+                            is_spot=True,
+                            price=price
+                        )
+            except ValueError:
+                print("   Invalid selection")
             
 if __name__ == "__main__":
     cloud_menu()

@@ -330,20 +330,36 @@ class DGEDashboard:
         print("-"*80)
         print("💡 Saves to HF every 1000 steps (~10 min). Safe for spot pods!")
         
-        confirm = input("\n   Deploy training? (y/n): ").strip().lower()
-        if confirm == 'y':
-            gpu_id, is_spot, cost = runpod_manager.select_gpu_interactive()
-            if gpu_id:
-                try:
-                    runpod_manager.deploy_experiment(
-                        "python experiments/run_tinystories_75m.py",
-                        gpu_type=gpu_id,
-                        is_spot=is_spot,
-                        price=cost
-                    )
-                    print("\n✅ Training deployed! Use 'Watch Progress' to monitor.")
-                except Exception as e:
-                    print(f"\n❌ Deployment failed: {e}")
+        # Direct GPU selection from list
+        choice = input("\n   Select GPU [1-15] or 'q' to cancel: ").strip().lower()
+        if choice == 'q':
+            input("\nPress Enter...")
+            return
+        
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(available[:15]):
+                selected = available[idx]
+                gpu_id = selected['id']
+                price = selected['communityPrice']
+                
+                print(f"\n   ✅ Selected: {selected['name']} @ ${price:.2f}/hr")
+                print(f"      Est. Time: {selected['est_hours']:.0f} hrs | Est. Cost: ${selected['est_cost']:.0f}")
+                
+                confirm = input("\n   Deploy training? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    try:
+                        runpod_manager.deploy_experiment(
+                            "python experiments/run_tinystories_75m.py",
+                            gpu_type=gpu_id,
+                            is_spot=True,
+                            price=price
+                        )
+                        print("\n✅ Training deployed! Use 'Watch Progress' to monitor.")
+                    except Exception as e:
+                        print(f"\n❌ Deployment failed: {e}")
+        except ValueError:
+            print("   Invalid selection")
         
         input("\nPress Enter...")
 
