@@ -22,11 +22,12 @@ WORKDIR /workspace/DGE
 COPY requirements.txt .
 
 # Install Python dependencies
-# IMPORTANT: Filter out torch to verify we use the base image's version (2.1.0)
-# and avoid pulling in massive CUDA 12 wheels.
-RUN grep -v "torch" requirements.txt > requirements.tmp && \
-    pip install --no-cache-dir -r requirements.tmp && \
-    rm requirements.tmp
+# Determine installed torch version and lock it to prevent upgrade
+RUN python -c "import torch; print(f'torch=={torch.__version__}')" > constraints.txt && \
+    cat constraints.txt && \
+    grep -v "torch" requirements.txt > requirements.tmp && \
+    pip install --no-cache-dir -r requirements.tmp -c constraints.txt && \
+    rm requirements.tmp constraints.txt
 
 # Reset frontend
 ENV DEBIAN_FRONTEND=dialog
