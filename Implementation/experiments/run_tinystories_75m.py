@@ -83,7 +83,7 @@ CONFIG = {
 def main():
     print("""
 ╔══════════════════════════════════════════════════════════════════╗
-║           TinyStories 75M - Full Training Run  (V 0.17.0)        ║
+║           TinyStories 75M - Full Training Run  (V 0.17.1)        ║
 ║                                                                  ║
 ║   Architecture: 768d × 12L × 12H = ~75M params                   ║
 ║   Target: Loss < 2.0 (coherent generation)                       ║
@@ -137,6 +137,56 @@ def main():
         print(f"   🚀 Using {num_gpus} GPUs with DataParallel!")
         model = nn.DataParallel(model)
     
+    # ========================================================================
+    # RESUME FROM CHECKPOINT (if available)
+    # ========================================================================
+    resume_step = 0
+    checkpoint_path = os.path.join(stage_path, "weights.pt")
+    
+    # Try to download checkpoint from HuggingFace
+    print("\n🔍 Checking for existing checkpoint on HuggingFace...", flush=True)
+    try:
+        from huggingface_hub import hf_hub_download
+        hf_weights = hf_hub_download(
+            repo_id=hf_mgr.repo_id,
+            filename=f"{CONFIG['family_name']}/{CONFIG['stage_name']}/weights.pt",
+            token=os.environ.get("HF_TOKEN")
+        )
+        # Copy to local path
+        import shutil
+        shutil.copy(hf_weights, checkpoint_path)
+        print(f"   ✅ Downloaded checkpoint from HuggingFace", flush=True)
+    except Exception as e:
+        print(f"   ℹ️ No HF checkpoint found: {e}", flush=True)
+    
+    # Load checkpoint if exists
+    if os.path.exists(checkpoint_path):
+        print(f"   📂 Loading checkpoint: {checkpoint_path}", flush=True)
+        try:
+            state_dict = torch.load(checkpoint_path, map_location=device)
+            # Handle DataParallel wrapper
+            if hasattr(model, 'module'):
+                model.module.load_state_dict(state_dict)
+            else:
+                model.load_state_dict(state_dict)
+            print(f"   ✅ Checkpoint loaded successfully", flush=True)
+            
+            # Try to extract step from diary
+            diary_path = os.path.join(stage_path, "diary.md")
+            if os.path.exists(diary_path):
+                with open(diary_path, 'r') as f:
+                    content = f.read()
+                    # Find last CHECKPOINT entry
+                    import re
+                    matches = re.findall(r'Saved at step (\d+)', content)
+                    if matches:
+                        resume_step = int(matches[-1])
+                        print(f"   🔄 Resuming from step {resume_step}", flush=True)
+        except Exception as e:
+            print(f"   ⚠️ Could not load checkpoint: {e}", flush=True)
+    else:
+        print(f"   🆕 Starting fresh training (no checkpoint found)", flush=True)
+    
     # Save config
     config_path = os.path.join(stage_path, "config.json")
     with open(config_path, 'w') as f:
@@ -176,7 +226,7 @@ def main():
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     
     start_time = time.time()
-    global_step = 0
+    global_step = resume_step  # Resume from checkpoint step
     running_loss = 0.0
     best_loss = float('inf')
     
