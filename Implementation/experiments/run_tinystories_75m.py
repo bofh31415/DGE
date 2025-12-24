@@ -83,13 +83,13 @@ CONFIG = {
 def main():
     print("""
 ╔══════════════════════════════════════════════════════════════════╗
-║           TinyStories 75M - Full Training Run                    ║
+║           TinyStories 75M - Full Training Run  (V 0.17.0)        ║
 ║                                                                  ║
 ║   Architecture: 768d × 12L × 12H = ~75M params                   ║
 ║   Target: Loss < 2.0 (coherent generation)                       ║
 ║   Estimated Time: 60-80 hours                                    ║
 ╚══════════════════════════════════════════════════════════════════╝
-""")
+""", flush=True)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"📡 Device: {device}")

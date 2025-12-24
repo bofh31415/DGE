@@ -10,7 +10,7 @@ load_dotenv()
 
 print("""
 ==================================================
-      DGE CLOUD COMMANDER V 0.16.0
+      DGE CLOUD COMMANDER V 0.17.0
       RunPod Operations Only
 ==================================================
 """)

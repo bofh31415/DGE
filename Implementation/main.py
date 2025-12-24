@@ -13,12 +13,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# V 0.16.0: Unified Commander Dashboard
+# V 0.17.0: Unified Commander Dashboard
 # The central mission control for DGE.
 
 TITLE = """
 ==================================================
-      DGE UNIFIED COMMANDER V 0.16.0
+      DGE UNIFIED COMMANDER V 0.17.0
       Local & Cloud Mission Control
 ==================================================
 """
