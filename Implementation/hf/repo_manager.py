@@ -168,6 +168,50 @@ class HFRepoManager:
             print(f"❌ Results upload failed: {e}")
             return False
     
+    def upload_directory(self, local_dir: str, hf_path: str = "") -> bool:
+        """
+        Upload all files from a local directory to HuggingFace.
+        
+        Args:
+            local_dir: Local directory to upload
+            hf_path: Path in the HF repo (e.g., 'checkpoints/step_1000')
+            
+        Returns:
+            True if successful
+        """
+        if not self.api or not os.path.exists(local_dir):
+            print(f"❌ Cannot upload: api={bool(self.api)}, exists={os.path.exists(local_dir)}")
+            return False
+        
+        try:
+            self._ensure_repo_exists()
+            
+            # Upload each file in the directory
+            uploaded_count = 0
+            for filename in os.listdir(local_dir):
+                filepath = os.path.join(local_dir, filename)
+                if os.path.isfile(filepath):
+                    # Determine path in repo
+                    if hf_path:
+                        path_in_repo = f"{hf_path}/{filename}"
+                    else:
+                        path_in_repo = filename
+                    
+                    self.api.upload_file(
+                        path_or_fileobj=filepath,
+                        path_in_repo=path_in_repo,
+                        repo_id=self.repo_id,
+                        repo_type="model",
+                        commit_message=f"Upload: {filename}"
+                    )
+                    uploaded_count += 1
+            
+            print(f"   ✅ Uploaded {uploaded_count} files to {self.repo_id}/{hf_path}", flush=True)
+            return True
+        except Exception as e:
+            print(f"❌ Directory upload failed: {e}", flush=True)
+            return False
+    
     def _do_upload(self, local_path: str, hf_path: str, step: int) -> bool:
         """Perform the actual upload."""
         if not self.api:
