@@ -26,6 +26,9 @@ import json
 import time
 import torch
 import torch.nn as nn
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -80,10 +83,29 @@ CONFIG = {
 # TRAINING SCRIPT
 # ============================================================================
 
+def setup_ddp():
+    """
+    Initialize DistributedDataParallel if launched via torchrun.
+    
+    Returns:
+        (rank, local_rank, world_size, is_ddp)
+    """
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        # Launched via torchrun
+        dist.init_process_group("nccl")
+        rank = int(os.environ['RANK'])
+        local_rank = int(os.environ['LOCAL_RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        torch.cuda.set_device(local_rank)
+        return rank, local_rank, world_size, True
+    else:
+        # Single GPU fallback
+        return 0, 0, 1, False
+
 def main():
     print("""
 ╔══════════════════════════════════════════════════════════════════╗
-║           TinyStories 75M - Full Training Run  (V 0.17.1)        ║
+║           TinyStories 75M - Full Training Run  (V 0.18.0)        ║
 ║                                                                  ║
 ║   Architecture: 768d × 12L × 12H = ~75M params                   ║
 ║   Target: Loss < 2.0 (coherent generation)                       ║
@@ -91,14 +113,22 @@ def main():
 ╚══════════════════════════════════════════════════════════════════╝
 """, flush=True)
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"📡 Device: {device}")
+    # Setup DDP (if multi-GPU via torchrun)
+    rank, local_rank, world_size, is_ddp = setup_ddp()
+    
+    if is_ddp:
+        device = torch.device(f"cuda:{local_rank}")
+        if rank == 0:
+            print(f"📡 DDP Mode: {world_size} GPUs, Rank {rank}", flush=True)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"📡 Device: {device}")
     
     if device.type == "cpu":
         print("⚠️  WARNING: Training on CPU will be extremely slow!")
         print("   Please run on a GPU instance.")
     
-    # Initialize managers
+    # Initialize managers (only on rank 0 for logging)
     mgr = ModelManager()
     hf_mgr = HFRepoManager(CONFIG["model_name"])  # V 0.2.0: Per-model repo
     
@@ -107,14 +137,16 @@ def main():
     stage_path = os.path.join(family_path, CONFIG["stage_name"])
     os.makedirs(stage_path, exist_ok=True)
     
-    # Initialize diary
+    # Initialize diary (only rank 0 writes)
     diary = Diary(stage_path)
-    diary.log("TRAINING_START", "TinyStories 75M training initiated", CONFIG)
+    if rank == 0:
+        diary.log("TRAINING_START", "TinyStories 75M training initiated", CONFIG)
     
     # ========================================================================
     # BUILD MODEL
     # ========================================================================
-    print("\n🔨 Building 75M model...")
+    if rank == 0:
+        print("\n🔨 Building 75M model...")
     model = DGESimpleTransformer(
         vocab_size=CONFIG["vocab_size"],
         d_model=CONFIG["d_model"],
@@ -126,16 +158,17 @@ def main():
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"   Total params: {total_params / 1e6:.1f}M")
-    print(f"   Trainable: {trainable_params / 1e6:.1f}M")
+    if rank == 0:
+        print(f"   Total params: {total_params / 1e6:.1f}M")
+        print(f"   Trainable: {trainable_params / 1e6:.1f}M")
     
     model = model.to(device)
     
-    # Multi-GPU support
-    num_gpus = torch.cuda.device_count()
-    if num_gpus > 1:
-        print(f"   🚀 Using {num_gpus} GPUs with DataParallel!")
-        model = nn.DataParallel(model)
+    # Multi-GPU support with DDP
+    if is_ddp:
+        model = DDP(model, device_ids=[local_rank])
+        if rank == 0:
+            print(f"   🚀 Using {world_size} GPUs with DistributedDataParallel!")
     
     # ========================================================================
     # RESUME FROM CHECKPOINT (if available)
@@ -195,16 +228,46 @@ def main():
     # ========================================================================
     # LOAD DATA
     # ========================================================================
-    print("\n📚 Loading TinyStories dataset...")
-    train_loader = load_tinystories(
-        split=CONFIG["split"],
-        max_samples=None,  # Use full dataset
-        seq_len=CONFIG["max_seq_len"],
+    if rank == 0:
+        print("\n📚 Loading TinyStories dataset...")
+    
+    # Load the underlying dataset first
+    from data.loader import load_tinystories, TextDataset
+    from torch.utils.data import DataLoader
+    from datasets import load_dataset
+    from transformers import AutoTokenizer
+    
+    # Load raw dataset
+    dataset = load_dataset("roneneldan/TinyStories", split=CONFIG["split"])
+    
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained('gpt2')
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    # Extract texts and create torch dataset
+    texts = [item['text'] for item in dataset]
+    torch_dataset = TextDataset(texts, tokenizer, CONFIG["max_seq_len"], CONFIG["vocab_size"])
+    
+    # Create sampler for DDP
+    if is_ddp:
+        train_sampler = DistributedSampler(torch_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+        shuffle = False  # Sampler handles shuffling
+    else:
+        train_sampler = None
+        shuffle = True
+    
+    train_loader = DataLoader(
+        torch_dataset,
         batch_size=CONFIG["batch_size"],
-        tokenizer_name='gpt2',
-        vocab_size=CONFIG["vocab_size"],
-        shuffle=True
+        shuffle=shuffle,
+        sampler=train_sampler,
+        num_workers=0,
+        pin_memory=True
     )
+    
+    if rank == 0:
+        print(f"✅ Loaded {len(torch_dataset)} samples, {len(train_loader)} batches (per GPU)")
     
     # ========================================================================
     # TRAINING LOOP
@@ -274,11 +337,11 @@ def main():
                 running_loss += loss.item()
                 global_step += 1
                 
-                # Logging
+                # Logging (only rank 0)
                 if global_step % CONFIG["log_interval"] == 0:
                     avg_loss = running_loss / CONFIG["log_interval"]
                     elapsed = time.time() - start_time
-                    tokens_seen = global_step * CONFIG["batch_size"] * CONFIG["max_seq_len"]
+                    tokens_seen = global_step * CONFIG["batch_size"] * CONFIG["max_seq_len"] * world_size
                     tokens_per_sec = tokens_seen / elapsed
                     
                     # ETA calculation
@@ -286,20 +349,21 @@ def main():
                     eta_seconds = remaining_steps / (global_step / elapsed) if global_step > 0 else 0
                     eta_hours = eta_seconds / 3600
                     
-                    print(f"Step {global_step:6d} | Loss: {avg_loss:.4f} | "
-                          f"LR: {scheduler.get_last_lr()[0]:.2e} | "
-                          f"Tokens: {tokens_seen/1e9:.2f}B | "
-                          f"Speed: {tokens_per_sec/1000:.1f}K tok/s | "
-                          f"ETA: {eta_hours:.1f}h", flush=True)
+                    if rank == 0:
+                        print(f"Step {global_step:6d} | Loss: {avg_loss:.4f} | "
+                              f"LR: {scheduler.get_last_lr()[0]:.2e} | "
+                              f"Tokens: {tokens_seen/1e9:.2f}B | "
+                              f"Speed: {tokens_per_sec/1000:.1f}K tok/s | "
+                              f"ETA: {eta_hours:.1f}h", flush=True)
                     
                     running_loss = 0.0
                     
                     # Check target loss
-                    if avg_loss < CONFIG["target_loss"]:
+                    if avg_loss < CONFIG["target_loss"] and rank == 0:
                         print(f"\n🎯 Target loss {CONFIG['target_loss']} reached!")
                 
-                # Evaluation
-                if global_step % CONFIG["eval_interval"] == 0:
+                # Evaluation (only rank 0)
+                if global_step % CONFIG["eval_interval"] == 0 and rank == 0:
                     diary.log("EVAL", f"Step {global_step}", {
                         "step": global_step,
                         "loss": avg_loss,
@@ -307,10 +371,12 @@ def main():
                         "elapsed_hours": elapsed / 3600
                     })
                 
-                # Save checkpoint
-                if global_step % CONFIG["save_interval"] == 0:
+                # Save checkpoint (only rank 0)
+                if global_step % CONFIG["save_interval"] == 0 and rank == 0:
+                    # For DDP, save the unwrapped model
+                    model_to_save = model.module if hasattr(model, 'module') else model
                     checkpoint_path = os.path.join(stage_path, "weights.pt")
-                    torch.save(model.state_dict(), checkpoint_path)
+                    torch.save(model_to_save.state_dict(), checkpoint_path)
                     
                     diary.log("CHECKPOINT", f"Saved at step {global_step}", {
                         "step": global_step,
@@ -331,46 +397,49 @@ def main():
                     if avg_loss < best_loss:
                         best_loss = avg_loss
                         best_path = os.path.join(stage_path, "best_weights.pt")
-                        torch.save(model.state_dict(), best_path)
+                        torch.save(model_to_save.state_dict(), best_path)
                         print(f"   🏆 New best loss: {best_loss:.4f}")
     
     except KeyboardInterrupt:
-        print("\n\n⚠️ Training interrupted!")
+        if rank == 0:
+            print("\n\n⚠️ Training interrupted!")
     
     # ========================================================================
-    # FINAL SAVE
+    # FINAL SAVE (only rank 0)
     # ========================================================================
-    print("\n💾 Saving final model...")
-    
-    final_path = os.path.join(stage_path, "weights.pt")
-    torch.save(model.state_dict(), final_path)
-    
-    elapsed_total = time.time() - start_time
-    final_tokens = global_step * CONFIG["batch_size"] * CONFIG["max_seq_len"]
-    
-    diary.log("TRAINING_COMPLETE", "Training finished", {
-        "final_step": global_step,
-        "final_loss": avg_loss if 'avg_loss' in dir() else None,
-        "best_loss": best_loss,
-        "tokens_seen": final_tokens,
-        "elapsed_hours": elapsed_total / 3600
-    })
-    
-    # Final HF upload
-    print("\n☁️ Uploading to HuggingFace...")
-    try:
-        hf_mgr.upload_directory(
-            stage_path,
-            f"{CONFIG['family_name']}/{CONFIG['stage_name']}"
-        )
-        print(f"✅ Uploaded to {CONFIG['hf_repo']}/{CONFIG['family_name']}/{CONFIG['stage_name']}")
-    except Exception as e:
-        print(f"❌ HF upload failed: {e}")
-    
-    # ========================================================================
-    # SUMMARY
-    # ========================================================================
-    print(f"""
+    if rank == 0:
+        print("\n💾 Saving final model...")
+        
+        model_to_save = model.module if hasattr(model, 'module') else model
+        final_path = os.path.join(stage_path, "weights.pt")
+        torch.save(model_to_save.state_dict(), final_path)
+        
+        elapsed_total = time.time() - start_time
+        final_tokens = global_step * CONFIG["batch_size"] * CONFIG["max_seq_len"] * world_size
+        
+        diary.log("TRAINING_COMPLETE", "Training finished", {
+            "final_step": global_step,
+            "final_loss": avg_loss if 'avg_loss' in dir() else None,
+            "best_loss": best_loss,
+            "tokens_seen": final_tokens,
+            "elapsed_hours": elapsed_total / 3600
+        })
+        
+        # Final HF upload
+        print("\n☁️ Uploading to HuggingFace...")
+        try:
+            hf_mgr.upload_directory(
+                stage_path,
+                f"{CONFIG['family_name']}/{CONFIG['stage_name']}"
+            )
+            print(f"✅ Uploaded to {CONFIG['hf_repo']}/{CONFIG['family_name']}/{CONFIG['stage_name']}")
+        except Exception as e:
+            print(f"❌ HF upload failed: {e}")
+        
+        # ========================================================================
+        # SUMMARY
+        # ========================================================================
+        print(f"""
 ╔══════════════════════════════════════════════════════════════════╗
 ║                    TRAINING COMPLETE                             ║
 ╠══════════════════════════════════════════════════════════════════╣
@@ -383,25 +452,29 @@ def main():
 ║   Diary: {stage_path}/diary.md
 ╚══════════════════════════════════════════════════════════════════╝
 """)
+        
+        # Test generation
+        print("\n🧪 Test Generation:")
+        model.eval()
+        prompt = "Once upon a time"
+        input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
+        
+        with torch.no_grad():
+            generated = input_ids
+            for _ in range(50):
+                logits, _ = model(generated[:, -CONFIG["max_seq_len"]:])
+                next_token = torch.argmax(logits[:, -1, :], dim=-1).unsqueeze(0)
+                generated = torch.cat([generated, next_token], dim=1)
+        
+        output = tokenizer.decode(generated[0], skip_special_tokens=True)
+        print(f"   Prompt: '{prompt}'")
+        print(f"   Output: '{output}'")
+        
+        print("\n✅ Done!")
     
-    # Test generation
-    print("\n🧪 Test Generation:")
-    model.eval()
-    prompt = "Once upon a time"
-    input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
-    
-    with torch.no_grad():
-        generated = input_ids
-        for _ in range(50):
-            logits, _ = model(generated[:, -CONFIG["max_seq_len"]:])
-            next_token = torch.argmax(logits[:, -1, :], dim=-1).unsqueeze(0)
-            generated = torch.cat([generated, next_token], dim=1)
-    
-    output = tokenizer.decode(generated[0], skip_special_tokens=True)
-    print(f"   Prompt: '{prompt}'")
-    print(f"   Output: '{output}'")
-    
-    print("\n✅ Done!")
+    # DDP cleanup
+    if is_ddp:
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()

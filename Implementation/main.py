@@ -362,6 +362,16 @@ class DGEDashboard:
                 print(f"\n   ✅ Selected: {selected['name']} @ ${price:.2f}/hr")
                 print(f"      Est. Time: {selected['est_hours']:.0f} hrs | Est. Cost: ${selected['est_cost']:.0f}")
                 
+                # GPU Count Selection (for multi-GPU DDP)
+                gpu_count_input = input("\n   🔢 Number of GPUs (1-8) [1]: ").strip()
+                gpu_count = int(gpu_count_input) if gpu_count_input.isdigit() and 1 <= int(gpu_count_input) <= 8 else 1
+                
+                if gpu_count > 1:
+                    print(f"      🚀 Using {gpu_count} GPUs with DistributedDataParallel (DDP)")
+                    command = f"torchrun --nproc_per_node={gpu_count} experiments/run_tinystories_75m.py"
+                else:
+                    command = "python experiments/run_tinystories_75m.py"
+                
                 # Docker Image Selection
                 use_docker = input("\n   🐳 Use optimized DGE Docker image (faster startup)? (y/n) [n]: ").strip().lower()
                 image_name = "darealsven/dge-env:latest" if use_docker == 'y' else None
@@ -370,8 +380,9 @@ class DGEDashboard:
                 if confirm == 'y':
                     try:
                         runpod_manager.deploy_experiment(
-                            "python experiments/run_tinystories_75m.py",
+                            command,
                             gpu_type=gpu_id,
+                            gpu_count=gpu_count,
                             is_spot=True,
                             price=price,
                             image_name=image_name
