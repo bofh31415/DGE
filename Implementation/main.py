@@ -197,6 +197,7 @@ class DGEDashboard:
             print("4. Watch Progress (live updates)")
             print("5. Remote Inference (List/Run HF Models)")
             print("6. 🆕 Train TinyStories 75M (~$25-70)")
+            print("7. 🧪 Train TinyStories 75M + LAWA (Experimental)")
             print("b. Back")
             
             choice = input("\nSelect Option: ").strip().lower()
@@ -213,6 +214,8 @@ class DGEDashboard:
                 self.deploy_ui()
             if choice == '6':
                 self.train_tinystories_75m_ui()
+            if choice == '7':
+                self.train_tinystories_lawa_ui()
 
     def watch_pod_progress(self):
         """Live monitoring of pod progress with GPU utilization."""
@@ -388,6 +391,132 @@ class DGEDashboard:
                             image_name=image_name
                         )
                         print("\n✅ Training deployed! Use 'Watch Progress' to monitor.")
+                    except Exception as e:
+                        print(f"\n❌ Deployment failed: {e}")
+        except ValueError:
+            print("   Invalid selection")
+        
+        input("\nPress Enter...")
+
+    def train_tinystories_lawa_ui(self):
+        """UI for training TinyStories 75M with LAWA checkpoint averaging."""
+        import cloud.runpod_manager as runpod_manager
+        
+        self.clear_screen()
+        print(TITLE)
+        print("--- TRAIN TINYSTORIES 75M + LAWA (Experimental) ---\n")
+        print("🧠 75M params | LAWA: Latest Weight Averaging")
+        print("📊 Saves both raw + averaged weights every checkpoint")
+        print("☁️ Syncs to HuggingFace + Google Drive")
+        
+        print("\n⏳ Checking GPU availability...")
+    
+        # Check for existing pods first
+        active_pods = runpod_manager.list_pods()
+        if active_pods:
+            print(f"\n⚠️  FOUND {len(active_pods)} ACTIVE PODS:")
+            for p in active_pods:
+                print(f"   - {p['id']} ({p['status']}) - {p['gpuTypeId']}")
+            
+            action = input("   Terminate all active pods before deploying? (y/n) [y]: ").strip().lower()
+            if action in ['', 'y']:
+                print("   🧨 Terminating pods...")
+                for p in active_pods:
+                    runpod_manager.terminate_pod(p['id'])
+                time.sleep(2)
+                
+        gpus = runpod_manager.get_available_gpus()
+        
+        if not gpus:
+            print("❌ Could not fetch GPU availability.")
+            input("\nPress Enter...")
+            return
+        
+        # Training parameters for cost estimation
+        TOTAL_TOKENS = 3.2e9
+        BASE_TOKENS_PER_SEC = 15000
+        BASE_TFLOPS = 82.6
+        
+        # Filter available spot GPUs and calculate costs
+        available = [g for g in gpus if g.get('communityPrice') and g['communityPrice'] > 0]
+        
+        for gpu in available:
+            tflops = gpu['tflops']
+            tokens_per_sec = BASE_TOKENS_PER_SEC * (tflops / BASE_TFLOPS)
+            
+            name = gpu['name']
+            if name.startswith('2x '): tokens_per_sec *= 2
+            elif name.startswith('3x '): tokens_per_sec *= 3
+            elif name.startswith('4x '): tokens_per_sec *= 4
+            elif name.startswith('8x '): tokens_per_sec *= 8
+            
+            training_hours = TOTAL_TOKENS / tokens_per_sec / 3600
+            total_cost = training_hours * gpu['communityPrice']
+            gpu['est_hours'] = training_hours
+            gpu['est_cost'] = total_cost
+        
+        available.sort(key=lambda x: x.get('est_cost', 9999))
+        
+        # Display top 15
+        print("\n" + "="*80)
+        print("💰 CHEAPEST GPUs FOR TINYSTORIES 75M + LAWA (sorted by total cost)")
+        print("="*80)
+        print(f"{'#':<3} | {'GPU':<22} | {'$/hr':<7} | {'VRAM':<6} | {'Time':<8} | {'Cost':<8}")
+        print("-"*80)
+        
+        for i, gpu in enumerate(available[:15], 1):
+            name = gpu['name'][:22]
+            price = f"${gpu['communityPrice']:.2f}"
+            vram = f"{int(gpu['vram'])} GB"
+            hours = f"{gpu['est_hours']:.0f}h"
+            cost = f"${gpu['est_cost']:.0f}"
+            print(f"{i:<3} | {name:<22} | {price:<7} | {vram:<6} | {hours:<8} | {cost:<8}")
+        
+        print("-"*80)
+        print("📊 LAWA: Averages last 5 checkpoints for better generalization")
+        print("☁️ Syncs to HF + Google Drive every 1000 steps")
+        
+        choice = input("\n   Select GPU [1-15] or 'q' to cancel: ").strip().lower()
+        if choice == 'q':
+            input("\nPress Enter...")
+            return
+        
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(available[:15]):
+                selected = available[idx]
+                gpu_id = selected['id']
+                price = selected['communityPrice']
+                
+                print(f"\n   ✅ Selected: {selected['name']} @ ${price:.2f}/hr")
+                print(f"      Est. Time: {selected['est_hours']:.0f} hrs | Est. Cost: ${selected['est_cost']:.0f}")
+                
+                # GPU Count Selection
+                gpu_count_input = input("\n   🔢 Number of GPUs (1-8) [1]: ").strip()
+                gpu_count = int(gpu_count_input) if gpu_count_input.isdigit() and 1 <= int(gpu_count_input) <= 8 else 1
+                
+                if gpu_count > 1:
+                    print(f"      🚀 Using {gpu_count} GPUs with DistributedDataParallel (DDP)")
+                    command = f"torchrun --nproc_per_node={gpu_count} experiments/run_tinystories_75m_lawa.py"
+                else:
+                    command = "python experiments/run_tinystories_75m_lawa.py"
+                
+                # Docker Image Selection
+                use_docker = input("\n   🐳 Use optimized DGE Docker image (faster startup)? (y/n) [n]: ").strip().lower()
+                image_name = "darealsven/dge-env:latest" if use_docker == 'y' else None
+                
+                confirm = input("\n   Deploy LAWA training? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    try:
+                        runpod_manager.deploy_experiment(
+                            command,
+                            gpu_type=gpu_id,
+                            gpu_count=gpu_count,
+                            is_spot=True,
+                            price=price,
+                            image_name=image_name
+                        )
+                        print("\n✅ LAWA Training deployed! Use 'Watch Progress' to monitor.")
                     except Exception as e:
                         print(f"\n❌ Deployment failed: {e}")
         except ValueError:
