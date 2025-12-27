@@ -92,7 +92,7 @@ CONFIG = {
     "lawa_save_averaged": True,    # Save averaged weights alongside raw
     
     # Google Drive Configuration
-    "use_gdrive": False,           # Set True to enable GDrive sync
+    "use_gdrive": True,            # GDrive sync ENABLED
     "gdrive_remote": "gdrive",     # rclone remote name
     "gdrive_path": "DGE/checkpoints",  # Path in GDrive
 }
