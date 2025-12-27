@@ -105,7 +105,7 @@ def setup_ddp():
 def main():
     print("""
 ╔══════════════════════════════════════════════════════════════════╗
-║           TinyStories 75M - Full Training Run  (V 0.18.0)        ║
+║           TinyStories 75M - Full Training Run  (V 0.18.1)        ║
 ║                                                                  ║
 ║   Architecture: 768d × 12L × 12H = ~75M params                   ║
 ║   Target: Loss < 2.0 (coherent generation)                       ║
@@ -177,20 +177,50 @@ def main():
     checkpoint_path = os.path.join(stage_path, "weights.pt")
     
     # Try to download checkpoint from HuggingFace
-    print("\n🔍 Checking for existing checkpoint on HuggingFace...", flush=True)
+    if rank == 0:
+        print("\n🔍 Checking for existing checkpoint on HuggingFace...", flush=True)
     try:
         from huggingface_hub import hf_hub_download
+        import shutil
+        
+        # Download weights
         hf_weights = hf_hub_download(
             repo_id=hf_mgr.repo_id,
             filename=f"{CONFIG['family_name']}/{CONFIG['stage_name']}/weights.pt",
             token=os.environ.get("HF_TOKEN")
         )
-        # Copy to local path
-        import shutil
         shutil.copy(hf_weights, checkpoint_path)
-        print(f"   ✅ Downloaded checkpoint from HuggingFace", flush=True)
+        if rank == 0:
+            print(f"   ✅ Downloaded checkpoint from HuggingFace", flush=True)
+        
+        # Download diary files (for resume step extraction)
+        try:
+            hf_diary_md = hf_hub_download(
+                repo_id=hf_mgr.repo_id,
+                filename=f"{CONFIG['family_name']}/{CONFIG['stage_name']}/diary.md",
+                token=os.environ.get("HF_TOKEN")
+            )
+            shutil.copy(hf_diary_md, os.path.join(stage_path, "diary.md"))
+            if rank == 0:
+                print(f"   ✅ Downloaded diary.md from HuggingFace", flush=True)
+        except Exception:
+            pass  # diary.md might not exist
+        
+        try:
+            hf_diary_jsonl = hf_hub_download(
+                repo_id=hf_mgr.repo_id,
+                filename=f"{CONFIG['family_name']}/{CONFIG['stage_name']}/diary.jsonl",
+                token=os.environ.get("HF_TOKEN")
+            )
+            shutil.copy(hf_diary_jsonl, os.path.join(stage_path, "diary.jsonl"))
+            if rank == 0:
+                print(f"   ✅ Downloaded diary.jsonl from HuggingFace", flush=True)
+        except Exception:
+            pass  # diary.jsonl might not exist
+            
     except Exception as e:
-        print(f"   ℹ️ No HF checkpoint found: {e}", flush=True)
+        if rank == 0:
+            print(f"   ℹ️ No HF checkpoint found: {e}", flush=True)
     
     # Load checkpoint if exists
     if os.path.exists(checkpoint_path):
